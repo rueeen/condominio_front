@@ -64,9 +64,18 @@ export default function CameraCapture({ onCapture }) {
     const height = video.videoHeight
     if (!width || !height) return
 
-    canvas.width = width
-    canvas.height = height
-    canvas.getContext('2d').drawImage(video, 0, 0, width, height)
+    const cropX = width * 0.10
+    const cropY = height * 0.375
+    const cropWidth = width * 0.80
+    const cropHeight = height * 0.25
+
+    canvas.width = cropWidth
+    canvas.height = cropHeight
+    canvas.getContext('2d').drawImage(
+      video,
+      cropX, cropY, cropWidth, cropHeight,
+      0, 0, cropWidth, cropHeight,
+    )
     canvas.toBlob((blob) => {
       if (!blob) {
         setError('No se pudo capturar la imagen. Intenta nuevamente.')
@@ -94,7 +103,7 @@ export default function CameraCapture({ onCapture }) {
       {cameraActive ? <div className="space-y-3">
         <div className="relative overflow-hidden rounded-2xl bg-slate-900">
           <video ref={videoRef} autoPlay playsInline muted className="max-h-72 w-full object-cover" />
-          <div className="pointer-events-none absolute inset-x-[12%] top-1/2 h-20 -translate-y-1/2 rounded-xl border-4 border-yellow-300 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" />
+          <div className="pointer-events-none absolute inset-x-[10%] inset-y-[37.5%] rounded-xl border-4 border-yellow-300 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" />
         </div>
         <button type="button" onClick={captureFrame} className="btn-primary h-16 w-full text-xl"><Camera/> Capturar</button>
       </div> : <button type="button" onClick={activateCamera} className="btn-secondary h-16 w-full justify-center text-xl"><Camera/> Activar cámara</button>}
