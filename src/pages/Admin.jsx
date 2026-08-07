@@ -153,6 +153,10 @@ export default function Admin() {
     { header: 'Nombre', accessorFn: propietario => `${propietario.first_name} ${propietario.last_name}`.trim() },
     { header: 'Torre', accessorKey: 'torre' },
     { header: 'Departamento', accessorKey: 'departamento' },
+    {
+      header: 'Estacionamientos',
+      accessorFn: propietario => propietario.estacionamientos?.join(', ') || 'Sin estacionamiento',
+    },
     { header: 'Acciones', cell: info => <button className="btn-secondary" onClick={() => abrirEdicion(info.row.original)}>Editar</button> },
   ], [])
 
