@@ -1,12 +1,12 @@
+import { flexRender, getCoreRowModel, getFilteredRowModel, getSortedRowModel, useReactTable } from '@tanstack/react-table'
 import { format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { Check, X } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 import api from '../api'
 import Layout from '../components/Layout'
 import Spinner from '../components/Spinner'
-import Table from '../components/Table'
 
 function getErrorMessage(error, fallback) {
   const data = error.response?.data
@@ -21,26 +21,66 @@ function getErrorMessage(error, fallback) {
   return fallback
 }
 
+function Table({ data, columns }) {
+  const [globalFilter, setGlobalFilter] = useState('')
+  const table = useReactTable({
+    data,
+    columns,
+    state: { globalFilter },
+    onGlobalFilterChange: setGlobalFilter,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+  })
+
+  return <>
+    <input className="input mb-3" placeholder="Filtrar por texto..." value={globalFilter} onChange={e => setGlobalFilter(e.target.value)} />
+    <div className="overflow-auto rounded-2xl border border-slate-200 bg-white">
+      <table className="min-w-full text-sm">
+        <thead className="bg-slate-50">
+          {table.getHeaderGroups().map(group => <tr key={group.id}>
+            {group.headers.map(header => <th className="cursor-pointer px-4 py-3 text-left" onClick={header.column.getToggleSortingHandler()} key={header.id}>
+              {flexRender(header.column.columnDef.header, header.getContext())}
+            </th>)}
+          </tr>)}
+        </thead>
+        <tbody>
+          {table.getRowModel().rows.map(row => <tr className="border-t border-slate-200 hover:bg-slate-50/70" key={row.id}>
+            {row.getVisibleCells().map(cell => <td className="px-4 py-3" key={cell.id}>
+              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+            </td>)}
+          </tr>)}
+        </tbody>
+      </table>
+    </div>
+  </>
+}
+
 export default function Admin() {
   const [vehiculos, setVehiculos] = useState([])
   const [ingresos, setIngresos] = useState([])
   const [propietarios, setPropietarios] = useState([])
+  const [estacionamientos, setEstacionamientos] = useState([])
   const [loading, setLoading] = useState(true)
   const [motivos, setMotivos] = useState({})
   const [editando, setEditando] = useState(null)
   const [guardando, setGuardando] = useState(false)
+  const [nuevoEstacionamiento, setNuevoEstacionamiento] = useState({ numero: '', propietario: '' })
+  const [guardandoEstacionamiento, setGuardandoEstacionamiento] = useState(false)
 
   const load = async () => {
     setLoading(true)
     try {
-      const [vehiculosResponse, ingresosResponse, propietariosResponse] = await Promise.all([
+      const [vehiculosResponse, ingresosResponse, propietariosResponse, estacionamientosResponse] = await Promise.all([
         api.get('/vehiculos/'),
         api.get('/ingresos/'),
         api.get('/propietarios/'),
+        api.get('/estacionamientos/'),
       ])
       setVehiculos(vehiculosResponse.data)
       setIngresos(ingresosResponse.data)
       setPropietarios(propietariosResponse.data)
+      setEstacionamientos(estacionamientosResponse.data)
     } finally {
       setLoading(false)
     }
@@ -50,7 +90,7 @@ export default function Admin() {
     Promise.resolve().then(load).catch(() => toast.error('No se pudo cargar admin'))
   }, [])
 
-  const resolver = useCallback(async (id, aprobar) => {
+  const resolver = async (id, aprobar) => {
     const motivo_rechazo = motivos[id]
     if (!aprobar && !motivo_rechazo) return toast.error('Ingresa el motivo de rechazo')
     try {
@@ -60,7 +100,7 @@ export default function Admin() {
     } catch (error) {
       toast.error(getErrorMessage(error, 'No se pudo resolver la solicitud'))
     }
-  }, [motivos])
+  }
 
   const abrirEdicion = propietario => {
     setEditando({ ...propietario, torre: String(propietario.torre), departamento: String(propietario.departamento) })
@@ -91,6 +131,37 @@ export default function Admin() {
     }
   }
 
+  const crearEstacionamiento = async event => {
+    event.preventDefault()
+    if (!nuevoEstacionamiento.numero.trim()) return toast.error('Ingresa el número de estacionamiento')
+    if (!nuevoEstacionamiento.propietario) return toast.error('Selecciona un propietario')
+
+    setGuardandoEstacionamiento(true)
+    try {
+      await api.post('/estacionamientos/', {
+        numero: nuevoEstacionamiento.numero.trim(),
+        propietario: Number(nuevoEstacionamiento.propietario),
+      })
+      toast.success('Estacionamiento asignado')
+      setNuevoEstacionamiento({ numero: '', propietario: '' })
+      await load()
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'No se pudo asignar el estacionamiento'))
+    } finally {
+      setGuardandoEstacionamiento(false)
+    }
+  }
+
+  const eliminarEstacionamiento = async id => {
+    try {
+      await api.delete(`/estacionamientos/${id}/`)
+      toast.success('Estacionamiento eliminado')
+      await load()
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'No se pudo eliminar el estacionamiento'))
+    }
+  }
+
   const pendientes = vehiculos.filter(vehiculo => vehiculo.estado === 'pendiente')
   const vehiculoCols = useMemo(() => [
     { header: 'Patente', accessorKey: 'patente' },
@@ -106,7 +177,7 @@ export default function Admin() {
         <button onClick={() => resolver(info.row.original.id, false)} className="btn-danger"><X size={16} /> Rechazar</button>
       </div>,
     },
-  ], [resolver])
+  ], [motivos])
   const ingresoCols = useMemo(() => [
     { header: 'Fecha', accessorKey: 'timestamp', cell: info => info.getValue() ? format(parseISO(info.getValue()), 'PPp', { locale: es }) : '' },
     { header: 'Tipo', accessorKey: 'tipo' },
@@ -124,6 +195,20 @@ export default function Admin() {
     },
     { header: 'Acciones', cell: info => <button className="btn-secondary" onClick={() => abrirEdicion(info.row.original)}>Editar</button> },
   ], [])
+  const estacionamientoCols = useMemo(() => [
+    { header: 'Número', accessorKey: 'numero' },
+    {
+      header: 'Propietario',
+      accessorFn: estacionamiento => {
+        const propietario = propietarios.find(p => p.id === estacionamiento.propietario)
+        return propietario ? `Torre ${propietario.torre} - Depto ${propietario.departamento} (${propietario.username})` : `#${estacionamiento.propietario}`
+      },
+    },
+    {
+      header: 'Acciones',
+      cell: info => <button className="btn-danger" onClick={() => eliminarEstacionamiento(info.row.original.id)}><X size={16} /> Eliminar</button>,
+    },
+  ], [propietarios])
 
   if (loading) return <Layout><Spinner /></Layout>
 
@@ -153,6 +238,39 @@ export default function Admin() {
           <button className="btn-secondary" type="button" disabled={guardando} onClick={() => setEditando(null)}>Cancelar</button>
         </form>}
         <Table data={propietarios} columns={propietarioCols} />
+      </section>
+      <section className="card">
+        <h1 className="mb-4 text-2xl font-bold">Estacionamientos</h1>
+        <form className="mb-4 flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4" onSubmit={crearEstacionamiento}>
+          <div>
+            <label className="block text-sm" htmlFor="numero-estacionamiento">Número</label>
+            <input
+              id="numero-estacionamiento"
+              className="input"
+              placeholder="228"
+              value={nuevoEstacionamiento.numero}
+              onChange={event => setNuevoEstacionamiento(current => ({ ...current, numero: event.target.value }))}
+            />
+          </div>
+          <div>
+            <label className="block text-sm" htmlFor="propietario-estacionamiento">Propietario</label>
+            <select
+              id="propietario-estacionamiento"
+              className="input"
+              value={nuevoEstacionamiento.propietario}
+              onChange={event => setNuevoEstacionamiento(current => ({ ...current, propietario: event.target.value }))}
+            >
+              <option value="">Selecciona un propietario</option>
+              {propietarios.map(propietario => <option key={propietario.id} value={propietario.id}>
+                Torre {propietario.torre} - Depto {propietario.departamento} ({propietario.username})
+              </option>)}
+            </select>
+          </div>
+          <button className="btn-ok" type="submit" disabled={guardandoEstacionamiento}>
+            {guardandoEstacionamiento ? 'Asignando...' : 'Asignar estacionamiento'}
+          </button>
+        </form>
+        <Table data={estacionamientos} columns={estacionamientoCols} />
       </section>
     </div>
   </Layout>
