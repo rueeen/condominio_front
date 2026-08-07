@@ -10,10 +10,17 @@ import api, { getApiErrorMessage, normalizeListResponse } from '../api'
 import Layout from '../components/Layout'
 import Table from '../components/Table'
 
-const rut = /^\d{7,8}-[\dkK]$/
 const patente = /^([A-Z]{4}\d{2}|[A-Z]{2}\d{4})$/
+const documentTypes = [
+  { value: 'rut', label: 'RUT chileno' },
+  { value: 'pasaporte', label: 'Pasaporte' },
+  { value: 'dni', label: 'DNI extranjero' },
+  { value: 'otro', label: 'Otro' },
+]
 const visitorSchema = z.object({
-  rut: z.string().regex(rut, 'Formato RUT: 12345678-9'),
+  tipo_documento: z.enum(['rut', 'pasaporte', 'dni', 'otro']),
+  numero_documento: z.string().trim().min(3, 'Ingresa al menos 3 caracteres').max(50, 'Máximo 50 caracteres'),
+  pais_documento: z.string().trim().max(80, 'Máximo 80 caracteres').optional(),
   nombre: z.string().min(2, 'Ingresa al menos 2 caracteres'),
   fecha_fin: z.preprocess(value => value === '' ? undefined : value, z.string().min(1).optional()),
 })
@@ -23,7 +30,7 @@ const emptyPage = { results: [], count: 0, next: null, previous: null, loading: 
 export default function Propietario() {
   const [lists, setLists] = useState({ visitantes: { ...emptyPage }, vehiculos: { ...emptyPage } })
   const [estacionamientos, setEstacionamientos] = useState(null)
-  const visitorForm = useForm({ resolver: zodResolver(visitorSchema) })
+  const visitorForm = useForm({ resolver: zodResolver(visitorSchema), defaultValues: { tipo_documento: 'rut', numero_documento: '', pais_documento: '', nombre: '', fecha_fin: '' } })
   const carForm = useForm({ resolver: zodResolver(carSchema) })
 
   const fetchList = useCallback(async (name, url = `/${name}/`) => {
@@ -43,7 +50,12 @@ export default function Propietario() {
   }, [fetchList])
 
   const crearVisitante = async data => {
-    const payload = { rut: data.rut, nombre: data.nombre }
+    const payload = {
+      tipo_documento: data.tipo_documento,
+      numero_documento: data.numero_documento.trim().toUpperCase(),
+      nombre: data.nombre.trim(),
+    }
+    if (data.tipo_documento !== 'rut' && data.pais_documento) payload.pais_documento = data.pais_documento.trim()
     if (data.fecha_fin) payload.fecha_fin = data.fecha_fin
     try {
       await api.post('/visitantes/', payload)
@@ -63,10 +75,14 @@ export default function Propietario() {
   const limiteConocido = Number.isFinite(limitePatentes)
   const limiteAlcanzado = limiteConocido && activeCars >= limitePatentes
   const espacios = Array.isArray(estacionamientos?.estacionamientos) ? estacionamientos.estacionamientos : []
+  const visitorDocumentType = visitorForm.watch('tipo_documento')
   const visitorCols = useMemo(() => [
-    { header: 'RUT', accessorKey: 'rut' }, { header: 'Nombre', accessorKey: 'nombre' },
+    { header: 'Nombre', accessorKey: 'nombre' },
+    { header: 'Tipo de documento', accessorKey: 'tipo_documento', cell: info => documentTypes.find(type => type.value === info.getValue())?.label || info.getValue() || '—' },
+    { header: 'Número de documento', accessorKey: 'numero_documento' },
+    { header: 'País', accessorKey: 'pais_documento', cell: info => info.getValue() || '—' },
     { header: 'Vigente hasta', accessorKey: 'fecha_fin', cell: info => info.getValue() ? `${format(parseISO(info.getValue()), 'PPp', { locale: es })} (${formatDistanceToNowStrict(parseISO(info.getValue()), { locale: es, addSuffix: true })})` : 'Vigencia predeterminada' },
-    { header: 'Estado', cell: info => { const active = info.row.original.fecha_fin && isAfter(parseISO(info.row.original.fecha_fin), new Date()); return <span className={active ? 'badge-green' : 'badge-gray'}>{active ? 'vigente' : 'expirada'}</span> } },
+    { header: 'Estado', cell: info => { const storedState = info.row.original.estado; const active = storedState ? ['vigente', 'activo', 'autorizado'].includes(storedState.toLowerCase()) : info.row.original.fecha_fin && isAfter(parseISO(info.row.original.fecha_fin), new Date()); const label = storedState || (active ? 'vigente' : 'expirada'); return <span className={active ? 'badge-green' : 'badge-gray'}>{label}</span> } },
   ], [])
   const carCols = useMemo(() => [{ header: 'Patente', accessorKey: 'patente' }, { header: 'Estado', cell: info => <span title={info.row.original.motivo_rechazo || ''} className={info.row.original.estado === 'aprobado' ? 'badge-green' : info.row.original.estado === 'rechazado' ? 'badge-red' : 'badge-yellow'}>{info.row.original.estado}</span> }], [])
   const tableProps = name => ({ ...lists[name], data: lists[name].results, onPrevious: () => fetchList(name, lists[name].previous), onNext: () => fetchList(name, lists[name].next) })
@@ -74,8 +90,10 @@ export default function Propietario() {
   return <Layout><div className="grid gap-6 lg:grid-cols-2">
     <section className="card"><h2 className="section-title"><UserPlus/> Visitantes</h2>
       <form onSubmit={visitorForm.handleSubmit(crearVisitante)} className="grid gap-3 md:grid-cols-2">
-        <div><input className="input w-full" placeholder="RUT" {...visitorForm.register('rut')}/>{visitorForm.formState.errors.rut && <p className="mt-1 text-sm text-red-600">{visitorForm.formState.errors.rut.message}</p>}</div>
-        <div><input className="input w-full" placeholder="Nombre" {...visitorForm.register('nombre')}/>{visitorForm.formState.errors.nombre && <p className="mt-1 text-sm text-red-600">{visitorForm.formState.errors.nombre.message}</p>}</div>
+        <div><label className="mb-1 block text-sm font-medium" htmlFor="visitor-document-type">Tipo de documento</label><select id="visitor-document-type" className="input w-full" {...visitorForm.register('tipo_documento')} onChange={event => { visitorForm.setValue('tipo_documento', event.target.value); if (event.target.value === 'rut') visitorForm.setValue('pais_documento', '') }}>{documentTypes.map(type => <option key={type.value} value={type.value}>{type.label}</option>)}</select></div>
+        <div><label className="mb-1 block text-sm font-medium" htmlFor="visitor-document-number">Número de documento</label><input id="visitor-document-number" className={`input w-full ${visitorDocumentType !== 'rut' ? 'uppercase' : ''}`} placeholder={visitorDocumentType === 'rut' ? '12.345.678-5' : 'PA123456'} {...visitorForm.register('numero_documento')}/>{visitorForm.formState.errors.numero_documento && <p className="mt-1 text-sm text-red-600">{visitorForm.formState.errors.numero_documento.message}</p>}</div>
+        {visitorDocumentType !== 'rut' && <div><label className="mb-1 block text-sm font-medium" htmlFor="visitor-document-country">País emisor (opcional)</label><input id="visitor-document-country" className="input w-full" placeholder="Ej.: Perú" {...visitorForm.register('pais_documento')}/>{visitorForm.formState.errors.pais_documento && <p className="mt-1 text-sm text-red-600">{visitorForm.formState.errors.pais_documento.message}</p>}</div>}
+        <div><label className="mb-1 block text-sm font-medium" htmlFor="visitor-name">Nombre</label><input id="visitor-name" className="input w-full" placeholder="Nombre" {...visitorForm.register('nombre')}/>{visitorForm.formState.errors.nombre && <p className="mt-1 text-sm text-red-600">{visitorForm.formState.errors.nombre.message}</p>}</div>
         <div className="md:col-span-2"><label className="mb-1 block text-sm font-medium" htmlFor="fecha-fin">Vigente hasta (opcional)</label><input id="fecha-fin" className="input w-full" type="datetime-local" {...visitorForm.register('fecha_fin')}/></div>
         <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800 md:col-span-2">Si no ingresas una fecha, el backend aplicará automáticamente la vigencia predeterminada configurada.</p>
         <button className="btn-primary md:col-span-2">Crear visitante</button>
