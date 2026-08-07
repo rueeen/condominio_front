@@ -1,19 +1,19 @@
 @import "tailwindcss";
 
 @layer base {
-  body { @apply m-0 bg-slate-100 font-sans text-slate-900 antialiased; }
+  body { @apply m-0 bg-slate-50 font-sans text-slate-900 antialiased; }
   button { @apply transition disabled:cursor-not-allowed; }
 }
 
 @layer components {
-  .card { @apply rounded-3xl border border-slate-200 bg-white p-5 shadow-sm; }
-  .input { @apply w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500/20 focus:border-blue-500 focus:ring-4; }
+  .card { @apply rounded-2xl border border-slate-200 bg-white p-5 shadow-sm; }
+  .input { @apply min-h-11 w-full rounded-md border border-slate-300 bg-white px-4 py-3 outline-none ring-[#4696e5]/20 transition focus:border-[#4696e5] focus:ring-4; }
   .field { @apply block space-y-2 text-left font-medium text-slate-700; }
   .error { @apply text-sm font-semibold text-red-600; }
-  .btn-primary { @apply inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-bold text-white shadow-sm hover:bg-blue-700; }
-  .btn-secondary { @apply inline-flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50; }
-  .btn-ok { @apply inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-2 font-semibold text-white hover:bg-emerald-700; }
-  .btn-danger { @apply inline-flex items-center gap-1 rounded-xl bg-red-600 px-3 py-2 font-semibold text-white hover:bg-red-700; }
+  .btn-primary { @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[#4696e5] px-5 py-3 font-bold text-white shadow-sm hover:bg-[#3485d5] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#4696e5]; }
+  .btn-secondary { @apply inline-flex min-h-11 items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700 hover:border-[#4696e5] hover:text-[#317fcf]; }
+  .btn-ok { @apply inline-flex min-h-11 items-center gap-1 rounded-md bg-emerald-600 px-4 py-2 font-semibold text-white hover:bg-emerald-700; }
+  .btn-danger { @apply inline-flex min-h-11 items-center gap-1 rounded-md bg-red-600 px-4 py-2 font-semibold text-white hover:bg-red-700; }
   .badge-green { @apply rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold uppercase text-emerald-700; }
   .badge-gray { @apply rounded-full bg-slate-100 px-3 py-1 text-xs font-bold uppercase text-slate-600; }
   .badge-yellow { @apply rounded-full bg-amber-100 px-3 py-1 text-xs font-bold uppercase text-amber-700; }

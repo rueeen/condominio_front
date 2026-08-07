@@ -35,7 +35,7 @@ function Table({ data, columns }) {
 
   return <>
     <input className="input mb-3" placeholder="Filtrar por texto..." value={globalFilter} onChange={e => setGlobalFilter(e.target.value)} />
-    <div className="overflow-auto rounded-2xl border bg-white">
+    <div className="overflow-auto rounded-2xl border border-slate-200 bg-white">
       <table className="min-w-full text-sm">
         <thead className="bg-slate-50">
           {table.getHeaderGroups().map(group => <tr key={group.id}>
@@ -45,7 +45,7 @@ function Table({ data, columns }) {
           </tr>)}
         </thead>
         <tbody>
-          {table.getRowModel().rows.map(row => <tr className="border-t" key={row.id}>
+          {table.getRowModel().rows.map(row => <tr className="border-t border-slate-200 hover:bg-slate-50/70" key={row.id}>
             {row.getVisibleCells().map(cell => <td className="px-4 py-3" key={cell.id}>
               {flexRender(cell.column.columnDef.cell, cell.getContext())}
             </td>)}
@@ -170,7 +170,7 @@ export default function Admin() {
       </section>
       <section className="card">
         <h1 className="mb-4 text-2xl font-bold">Propietarios</h1>
-        {editando && <form className="mb-4 flex flex-wrap items-end gap-3 rounded-xl bg-slate-50 p-4" onSubmit={guardarPropietario}>
+        {editando && <form className="mb-4 flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4" onSubmit={guardarPropietario}>
           <div>
             <p className="mb-2 font-semibold">Editando a {editando.username}</p>
             <label className="block text-sm" htmlFor="torre">Torre</label>
