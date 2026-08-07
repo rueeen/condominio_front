@@ -2,17 +2,90 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { format, formatDistanceToNowStrict, isAfter, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { Car, UserPlus } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import toast from 'react-hot-toast'
 import { z } from 'zod'
-import api from '../api'
+import api, { getApiErrorMessage, normalizeListResponse } from '../api'
 import Layout from '../components/Layout'
-import Spinner from '../components/Spinner'
 import Table from '../components/Table'
 
-const rut = /^\d{7,8}-[\dkK]$/; const patente = /^([A-Z]{4}\d{2}|[A-Z]{2}\d{4})$/
-function getErrorMessage(error, fallback){ const data=error.response?.data; if(typeof data==='string')return data; if(Array.isArray(data))return data[0] || fallback; if(data&&typeof data==='object'){ for(const value of Object.values(data)){ if(Array.isArray(value)&&value[0])return value[0]; if(typeof value==='string')return value } } return fallback }
-const visitorSchema = z.object({ rut: z.string().regex(rut,'Formato RUT: 12345678-9'), nombre: z.string().min(2), fecha_fin: z.string().optional() })
-const carSchema = z.object({ patente: z.string().transform(v=>v.toUpperCase()).refine(v=>patente.test(v),'Formato: AABB11 o AA1111') })
-export default function Propietario(){ const [visitantes,setVisitantes]=useState([]),[vehiculos,setVehiculos]=useState([]),[estacionamientos,setEstacionamientos]=useState(null),[loading,setLoading]=useState(true); const vf=useForm({resolver:zodResolver(visitorSchema)}), cf=useForm({resolver:zodResolver(carSchema)}); const load=async(loadParking=true)=>{setLoading(true); try { const [v,c,e]=await Promise.all([api.get('/visitantes/'),api.get('/vehiculos/'),loadParking?api.get('/mis-estacionamientos/').catch(()=>null):Promise.resolve(null)]); setVisitantes(v.data); setVehiculos(c.data); if(loadParking)setEstacionamientos(e?.data ?? null) } finally { setLoading(false) }}; useEffect(()=>{Promise.resolve().then(load).catch(()=>toast.error('No se pudieron cargar los datos'))},[]); const activeCars=vehiculos.filter(v=>['pendiente','aprobado'].includes(v.estado)).length; const limitePatentes=estacionamientos?.limite_patentes; const limiteConocido=Number.isFinite(limitePatentes); const limiteAlcanzado=limiteConocido&&activeCars>=limitePatentes; const espacios=estacionamientos?.estacionamientos ?? []; const visitorCols=useMemo(()=>[{header:'RUT',accessorKey:'rut'},{header:'Nombre',accessorKey:'nombre'},{header:'Vigente hasta',accessorKey:'fecha_fin',cell:i=>i.getValue()?`${format(parseISO(i.getValue()),'PPp',{locale:es})} (${formatDistanceToNowStrict(parseISO(i.getValue()),{locale:es,addSuffix:true})})`:'Por defecto'},{header:'Estado',cell:i=>{const ok=i.row.original.fecha_fin&&isAfter(parseISO(i.row.original.fecha_fin),new Date()); return <span className={ok?'badge-green':'badge-gray'}>{ok?'vigente':'expirada'}</span>}}],[]); const carCols=useMemo(()=>[{header:'Patente',accessorKey:'patente'},{header:'Estado',cell:i=><span title={i.row.original.motivo_rechazo||''} className={i.row.original.estado==='aprobado'?'badge-green':i.row.original.estado==='rechazado'?'badge-red':'badge-yellow'}>{i.row.original.estado}</span>}],[]); if(loading)return <Layout><Spinner/></Layout>; return <Layout><div className="grid gap-6 lg:grid-cols-2"><section className="card"><h2 className="section-title"><UserPlus/> Visitantes</h2><form onSubmit={vf.handleSubmit(async d=>{try{await api.post('/visitantes/',d); toast.success('Visita creada'); vf.reset(); load(false)}catch(error){toast.error(getErrorMessage(error,'No se pudo crear la visita'))}})} className="grid gap-3 md:grid-cols-2"><input className="input" placeholder="RUT" {...vf.register('rut')}/><input className="input" placeholder="Nombre" {...vf.register('nombre')}/><input className="input md:col-span-2" type="datetime-local" {...vf.register('fecha_fin')}/><p className="text-sm text-slate-500 md:col-span-2">Si no se llena, vigencia por defecto: 4 horas.</p><button className="btn-primary md:col-span-2">Crear visitante</button></form><div className="mt-5"><Table data={visitantes} columns={visitorCols}/></div></section><section className="card"><h2 className="section-title"><Car/> Vehículos</h2>{limiteConocido&&(espacios.length>0?<p className="mb-3 text-sm text-slate-600">Tienes {espacios.length} {espacios.length===1?'estacionamiento':'estacionamientos'} ({espacios.join(', ')}) — puedes registrar hasta {limitePatentes} {limitePatentes===1?'vehículo':'vehículos'}.</p>:<p className="mb-3 text-sm text-red-600">No tienes estacionamientos asignados — no puedes registrar vehículos. Contacta al administrador.</p>)}<form onSubmit={cf.handleSubmit(async d=>{try{await api.post('/vehiculos/',d); toast.success('Solicitud enviada'); cf.reset(); load(false)}catch(error){toast.error(getErrorMessage(error,'No se pudo enviar la solicitud'))}})} className="flex gap-3"><input className="input" placeholder="Patente" {...cf.register('patente')}/><button disabled={limiteAlcanzado} className="btn-primary disabled:opacity-50">Solicitar</button></form>{limiteAlcanzado&&limitePatentes>0&&<p className="mt-2 text-sm text-red-600">Ya alcanzaste el límite de {limitePatentes} {limitePatentes===1?'patente pendiente o aprobada':'patentes pendientes o aprobadas'}.</p>}<div className="mt-5"><Table data={vehiculos} columns={carCols}/></div></section></div></Layout> }
+const rut = /^\d{7,8}-[\dkK]$/
+const patente = /^([A-Z]{4}\d{2}|[A-Z]{2}\d{4})$/
+const visitorSchema = z.object({
+  rut: z.string().regex(rut, 'Formato RUT: 12345678-9'),
+  nombre: z.string().min(2, 'Ingresa al menos 2 caracteres'),
+  fecha_fin: z.preprocess(value => value === '' ? undefined : value, z.string().min(1).optional()),
+})
+const carSchema = z.object({ patente: z.string().transform(value => value.toUpperCase()).refine(value => patente.test(value), 'Formato: AABB11 o AA1111') })
+const emptyPage = { results: [], count: 0, next: null, previous: null, loading: true, error: '' }
+
+export default function Propietario() {
+  const [lists, setLists] = useState({ visitantes: { ...emptyPage }, vehiculos: { ...emptyPage } })
+  const [estacionamientos, setEstacionamientos] = useState(null)
+  const visitorForm = useForm({ resolver: zodResolver(visitorSchema) })
+  const carForm = useForm({ resolver: zodResolver(carSchema) })
+
+  const fetchList = useCallback(async (name, url = `/${name}/`) => {
+    setLists(current => ({ ...current, [name]: { ...current[name], loading: true, error: '' } }))
+    try {
+      const response = await api.get(url)
+      setLists(current => ({ ...current, [name]: { ...normalizeListResponse(response.data), loading: false, error: '' } }))
+    } catch (error) {
+      setLists(current => ({ ...current, [name]: { ...current[name], loading: false, error: getApiErrorMessage(error, 'No se pudieron cargar los registros') } }))
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchList('visitantes')
+    fetchList('vehiculos')
+    api.get('/mis-estacionamientos/').then(response => setEstacionamientos(response.data)).catch(() => setEstacionamientos(null))
+  }, [fetchList])
+
+  const crearVisitante = async data => {
+    const payload = { rut: data.rut, nombre: data.nombre }
+    if (data.fecha_fin) payload.fecha_fin = data.fecha_fin
+    try {
+      await api.post('/visitantes/', payload)
+      toast.success('Visita creada'); visitorForm.reset(); await fetchList('visitantes')
+    } catch (error) { toast.error(getApiErrorMessage(error, 'No se pudo crear la visita')) }
+  }
+  const crearVehiculo = async data => {
+    try {
+      await api.post('/vehiculos/', data)
+      toast.success('Solicitud enviada'); carForm.reset(); await fetchList('vehiculos')
+    } catch (error) { toast.error(getApiErrorMessage(error, 'No se pudo enviar la solicitud')) }
+  }
+
+  const { vehiculos } = lists
+  const activeCars = vehiculos.results.filter(vehicle => ['pendiente', 'aprobado'].includes(vehicle.estado)).length
+  const limitePatentes = estacionamientos?.limite_patentes
+  const limiteConocido = Number.isFinite(limitePatentes)
+  const limiteAlcanzado = limiteConocido && activeCars >= limitePatentes
+  const espacios = Array.isArray(estacionamientos?.estacionamientos) ? estacionamientos.estacionamientos : []
+  const visitorCols = useMemo(() => [
+    { header: 'RUT', accessorKey: 'rut' }, { header: 'Nombre', accessorKey: 'nombre' },
+    { header: 'Vigente hasta', accessorKey: 'fecha_fin', cell: info => info.getValue() ? `${format(parseISO(info.getValue()), 'PPp', { locale: es })} (${formatDistanceToNowStrict(parseISO(info.getValue()), { locale: es, addSuffix: true })})` : 'Vigencia predeterminada' },
+    { header: 'Estado', cell: info => { const active = info.row.original.fecha_fin && isAfter(parseISO(info.row.original.fecha_fin), new Date()); return <span className={active ? 'badge-green' : 'badge-gray'}>{active ? 'vigente' : 'expirada'}</span> } },
+  ], [])
+  const carCols = useMemo(() => [{ header: 'Patente', accessorKey: 'patente' }, { header: 'Estado', cell: info => <span title={info.row.original.motivo_rechazo || ''} className={info.row.original.estado === 'aprobado' ? 'badge-green' : info.row.original.estado === 'rechazado' ? 'badge-red' : 'badge-yellow'}>{info.row.original.estado}</span> }], [])
+  const tableProps = name => ({ ...lists[name], data: lists[name].results, onPrevious: () => fetchList(name, lists[name].previous), onNext: () => fetchList(name, lists[name].next) })
+
+  return <Layout><div className="grid gap-6 lg:grid-cols-2">
+    <section className="card"><h2 className="section-title"><UserPlus/> Visitantes</h2>
+      <form onSubmit={visitorForm.handleSubmit(crearVisitante)} className="grid gap-3 md:grid-cols-2">
+        <div><input className="input w-full" placeholder="RUT" {...visitorForm.register('rut')}/>{visitorForm.formState.errors.rut && <p className="mt-1 text-sm text-red-600">{visitorForm.formState.errors.rut.message}</p>}</div>
+        <div><input className="input w-full" placeholder="Nombre" {...visitorForm.register('nombre')}/>{visitorForm.formState.errors.nombre && <p className="mt-1 text-sm text-red-600">{visitorForm.formState.errors.nombre.message}</p>}</div>
+        <div className="md:col-span-2"><label className="mb-1 block text-sm font-medium" htmlFor="fecha-fin">Vigente hasta (opcional)</label><input id="fecha-fin" className="input w-full" type="datetime-local" {...visitorForm.register('fecha_fin')}/></div>
+        <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800 md:col-span-2">Si no ingresas una fecha, el backend aplicará automáticamente la vigencia predeterminada configurada.</p>
+        <button className="btn-primary md:col-span-2">Crear visitante</button>
+      </form><div className="mt-5"><Table {...tableProps('visitantes')} columns={visitorCols} emptyMessage="No hay visitantes registrados."/></div>
+    </section>
+    <section className="card"><h2 className="section-title"><Car/> Vehículos</h2>
+      {limiteConocido && (espacios.length > 0 ? <p className="mb-3 text-sm text-slate-600">Tienes {espacios.length} {espacios.length === 1 ? 'estacionamiento' : 'estacionamientos'} ({espacios.join(', ')}) — puedes registrar hasta {limitePatentes} {limitePatentes === 1 ? 'vehículo' : 'vehículos'}.</p> : <p className="mb-3 text-sm text-red-600">No tienes estacionamientos asignados — no puedes registrar vehículos. Contacta al administrador.</p>)}
+      <form onSubmit={carForm.handleSubmit(crearVehiculo)} className="flex gap-3"><div className="grow"><input className="input w-full" placeholder="Patente" {...carForm.register('patente')}/>{carForm.formState.errors.patente && <p className="mt-1 text-sm text-red-600">{carForm.formState.errors.patente.message}</p>}</div><button disabled={limiteAlcanzado} className="btn-primary self-start disabled:opacity-50">Solicitar</button></form>
+      {limiteAlcanzado && limitePatentes > 0 && <p className="mt-2 text-sm text-red-600">Ya alcanzaste el límite de {limitePatentes} {limitePatentes === 1 ? 'patente pendiente o aprobada' : 'patentes pendientes o aprobadas'}.</p>}
+      <div className="mt-5"><Table {...tableProps('vehiculos')} columns={carCols} emptyMessage="No hay vehículos registrados."/></div>
+    </section>
+  </div></Layout>
+}
