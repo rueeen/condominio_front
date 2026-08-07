@@ -5,6 +5,22 @@ import api from '../api'
 const INTERVALO_DETECCION_MS = 800
 const ANCHO_FRAME_DETECCION = 480
 const UMBRAL_CAPTURAS_SEGUIDAS = 3
+const MAX_FALLOS_SEGUIDOS = 4
+
+// Proporción del recuadro guía, relativa al frame nativo de la cámara.
+// Una patente chilena real mide ~360x130mm (razón ~2.7:1) — este recorte
+// da margen de encuadre a pulso sin mandar tanto fondo como el frame
+// completo.
+const RECORTE = { x: 0.08, y: 0.36, width: 0.84, height: 0.22 }
+
+function calcularRectRecorte(videoWidth, videoHeight) {
+  return {
+    x: videoWidth * RECORTE.x,
+    y: videoHeight * RECORTE.y,
+    width: videoWidth * RECORTE.width,
+    height: videoHeight * RECORTE.height,
+  }
+}
 
 export default function CameraCapture({ onCapture }) {
   const videoRef = useRef(null)
@@ -13,14 +29,17 @@ export default function CameraCapture({ onCapture }) {
   const streamRef = useRef(null)
   const capturedUrlRef = useRef('')
   const pollIntervalRef = useRef(null)
+  const pollAbortControllerRef = useRef(null)
   const pollInProgressRef = useRef(false)
   const captureInProgressRef = useRef(false)
   const captureFrameRef = useRef(null)
   const detectedStreakRef = useRef(0)
+  const fallosSeguidosRef = useRef(0)
   const [capturedUrl, setCapturedUrl] = useState('')
   const [error, setError] = useState('')
   const [cameraActive, setCameraActive] = useState(false)
   const [detectedStreak, setDetectedStreak] = useState(0)
+  const [deteccionAutoDisponible, setDeteccionAutoDisponible] = useState(true)
 
   const resetDetection = () => {
     detectedStreakRef.current = 0
@@ -30,6 +49,9 @@ export default function CameraCapture({ onCapture }) {
   const stopPolling = () => {
     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
     pollIntervalRef.current = null
+    pollAbortControllerRef.current?.abort()
+    pollAbortControllerRef.current = null
+    pollInProgressRef.current = false
   }
 
   const clearCapturedUrl = () => {
@@ -69,6 +91,8 @@ export default function CameraCapture({ onCapture }) {
     setError('')
     clearCapturedUrl()
     captureInProgressRef.current = false
+    fallosSeguidosRef.current = 0
+    setDeteccionAutoDisponible(true)
     resetDetection()
 
     try {
@@ -95,10 +119,10 @@ export default function CameraCapture({ onCapture }) {
     stopPolling()
     resetDetection()
 
-    const cropX = width * 0.10
-    const cropY = height * 0.375
-    const cropWidth = width * 0.80
-    const cropHeight = height * 0.25
+    const cropX = width * RECORTE.x
+    const cropY = height * RECORTE.y
+    const cropWidth = width * RECORTE.width
+    const cropHeight = height * RECORTE.height
 
     canvas.width = cropWidth
     canvas.height = cropHeight
@@ -134,10 +158,17 @@ export default function CameraCapture({ onCapture }) {
       if (!video || !canvas || !video.videoWidth || !video.videoHeight) return
 
       pollInProgressRef.current = true
-      const scale = Math.min(1, ANCHO_FRAME_DETECCION / video.videoWidth)
-      canvas.width = Math.round(video.videoWidth * scale)
-      canvas.height = Math.round(video.videoHeight * scale)
-      canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height)
+      const controller = new AbortController()
+      pollAbortControllerRef.current = controller
+      const rect = calcularRectRecorte(video.videoWidth, video.videoHeight)
+      const scale = Math.min(1, ANCHO_FRAME_DETECCION / rect.width)
+      canvas.width = Math.round(rect.width * scale)
+      canvas.height = Math.round(rect.height * scale)
+      canvas.getContext('2d').drawImage(
+        video,
+        rect.x, rect.y, rect.width, rect.height,
+        0, 0, canvas.width, canvas.height,
+      )
 
       try {
         const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.75))
@@ -145,24 +176,39 @@ export default function CameraCapture({ onCapture }) {
 
         const formData = new FormData()
         formData.append('foto', blob, 'deteccion.jpg')
-        const { data } = await api.post('/ocr/detectar-patente/', formData)
-        if (captureInProgressRef.current) return
+        const { data } = await api.post('/ocr/detectar-patente/', formData, { signal: controller.signal })
+        if (controller.signal.aborted || captureInProgressRef.current) return
 
         if (data.detectada) {
+          fallosSeguidosRef.current = 0
           const nextStreak = detectedStreakRef.current + 1
           detectedStreakRef.current = nextStreak
           setDetectedStreak(nextStreak)
           if (nextStreak >= UMBRAL_CAPTURAS_SEGUIDAS) captureFrameRef.current?.()
         } else {
+          fallosSeguidosRef.current = 0
           resetDetection()
         }
       } catch {
         // Un fallo transitorio del detector no debe bloquear la captura manual.
-        resetDetection()
+        if (!controller.signal.aborted) {
+          resetDetection()
+          fallosSeguidosRef.current += 1
+          if (fallosSeguidosRef.current >= MAX_FALLOS_SEGUIDOS) {
+            setDeteccionAutoDisponible(false)
+            setError('No se pudo conectar con la detección automática. Puedes seguir usando el botón Capturar manualmente.')
+          }
+        }
       } finally {
-        pollInProgressRef.current = false
+        // No modificar el flag de una sesión nueva si esta petición fue cancelada.
+        if (pollAbortControllerRef.current === controller) {
+          pollAbortControllerRef.current = null
+          pollInProgressRef.current = false
+        }
       }
     }
+
+    if (!deteccionAutoDisponible) return undefined
 
     pollCurrentFrame()
     pollIntervalRef.current = setInterval(pollCurrentFrame, INTERVALO_DETECCION_MS)
@@ -170,7 +216,7 @@ export default function CameraCapture({ onCapture }) {
     return () => {
       stopPolling()
     }
-  }, [cameraActive])
+  }, [cameraActive, deteccionAutoDisponible])
 
   const handleFile = (event) => {
     const file = event.target.files?.[0]
@@ -183,19 +229,19 @@ export default function CameraCapture({ onCapture }) {
   return <div className="space-y-3">
     {capturedUrl ? <div className="space-y-3">
       <img src={capturedUrl} alt="Patente capturada" className="max-h-72 w-full rounded-2xl object-cover" />
-      <button type="button" onClick={activateCamera} className="btn-secondary h-14 w-full justify-center text-xl"><RefreshCw/> Reintentar</button>
+      <button type="button" onClick={activateCamera} className="btn-secondary h-14 w-full justify-center text-xl"><RefreshCw /> Reintentar</button>
     </div> : <>
       {cameraActive ? <div className="space-y-3">
         <div className="relative overflow-hidden rounded-2xl bg-slate-900">
           <video ref={videoRef} autoPlay playsInline muted className="max-h-72 w-full object-cover" />
-          <div className={`pointer-events-none absolute inset-x-[10%] inset-y-[37.5%] rounded-xl border-4 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)] transition-all duration-300 ${detectedStreak > 0 ? 'animate-pulse border-green-400' : 'border-yellow-300'}`} />
+          <div className={`pointer-events-none absolute inset-x-[8%] inset-y-[36%] rounded-xl border-4 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)] transition-all duration-300 ${detectedStreak > 0 ? 'animate-pulse border-green-400' : 'border-yellow-300'}`} />
         </div>
         {detectedStreak > 0 && detectedStreak < UMBRAL_CAPTURAS_SEGUIDAS && <p className="text-center font-semibold text-green-700" aria-live="polite">Mantén la patente así...</p>}
-        <button type="button" onClick={captureFrame} className="btn-primary h-16 w-full text-xl"><Camera/> Capturar</button>
-      </div> : <button type="button" onClick={activateCamera} className="btn-secondary h-16 w-full justify-center text-xl"><Camera/> Activar cámara</button>}
+        <button type="button" onClick={captureFrame} className="btn-primary h-16 w-full text-xl"><Camera /> Capturar</button>
+      </div> : <button type="button" onClick={activateCamera} className="btn-secondary h-16 w-full justify-center text-xl"><Camera /> Activar cámara</button>}
     </>}
     {error && <p className="text-sm text-red-600">{error}</p>}
-    {error && <label className="btn-secondary flex h-16 w-full cursor-pointer justify-center text-xl"><Camera/> Subir foto de patente<input className="hidden" type="file" accept="image/*" capture="environment" onChange={handleFile}/></label>}
+    {error && <label className="btn-secondary flex h-16 w-full cursor-pointer justify-center text-xl"><Camera /> Subir foto de patente<input className="hidden" type="file" accept="image/*" capture="environment" onChange={handleFile} /></label>}
     <canvas ref={canvasRef} className="hidden" />
     <canvas ref={detectionCanvasRef} className="hidden" />
   </div>
