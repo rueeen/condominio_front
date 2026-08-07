@@ -13,6 +13,7 @@ export default function CameraCapture({ onCapture }) {
   const streamRef = useRef(null)
   const capturedUrlRef = useRef('')
   const pollIntervalRef = useRef(null)
+  const pollAbortControllerRef = useRef(null)
   const pollInProgressRef = useRef(false)
   const captureInProgressRef = useRef(false)
   const captureFrameRef = useRef(null)
@@ -30,6 +31,9 @@ export default function CameraCapture({ onCapture }) {
   const stopPolling = () => {
     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
     pollIntervalRef.current = null
+    pollAbortControllerRef.current?.abort()
+    pollAbortControllerRef.current = null
+    pollInProgressRef.current = false
   }
 
   const clearCapturedUrl = () => {
@@ -134,6 +138,8 @@ export default function CameraCapture({ onCapture }) {
       if (!video || !canvas || !video.videoWidth || !video.videoHeight) return
 
       pollInProgressRef.current = true
+      const controller = new AbortController()
+      pollAbortControllerRef.current = controller
       const scale = Math.min(1, ANCHO_FRAME_DETECCION / video.videoWidth)
       canvas.width = Math.round(video.videoWidth * scale)
       canvas.height = Math.round(video.videoHeight * scale)
@@ -145,8 +151,8 @@ export default function CameraCapture({ onCapture }) {
 
         const formData = new FormData()
         formData.append('foto', blob, 'deteccion.jpg')
-        const { data } = await api.post('/ocr/detectar-patente/', formData)
-        if (captureInProgressRef.current) return
+        const { data } = await api.post('/ocr/detectar-patente/', formData, { signal: controller.signal })
+        if (controller.signal.aborted || captureInProgressRef.current) return
 
         if (data.detectada) {
           const nextStreak = detectedStreakRef.current + 1
@@ -158,9 +164,13 @@ export default function CameraCapture({ onCapture }) {
         }
       } catch {
         // Un fallo transitorio del detector no debe bloquear la captura manual.
-        resetDetection()
+        if (!controller.signal.aborted) resetDetection()
       } finally {
-        pollInProgressRef.current = false
+        // No modificar el flag de una sesión nueva si esta petición fue cancelada.
+        if (pollAbortControllerRef.current === controller) {
+          pollAbortControllerRef.current = null
+          pollInProgressRef.current = false
+        }
       }
     }
 
