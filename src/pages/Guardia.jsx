@@ -7,6 +7,7 @@ import Layout from '../components/Layout'
 import QrScanner from '../components/QrScanner'
 import Spinner from '../components/Spinner'
 import { documentoEsValido, formatearDocumento } from '../utils/documento'
+import { MENSAJE_FORMATO_PATENTE, normalizarPatente, patenteEsValida } from '../utils/patente'
 
 const documentTypes = [
   { value: 'rut', label: 'RUT chileno' },
@@ -14,8 +15,6 @@ const documentTypes = [
   { value: 'dni', label: 'DNI extranjero' },
   { value: 'otro', label: 'Otro' },
 ]
-const patenteOk = (value) => /^([A-Z]{4}\d{2}|[A-Z]{2}\d{4})$/.test(value)
-
 function Result({ status, title, details }) {
   if (!status) return null
   const styles = {
@@ -129,13 +128,13 @@ export default function Guardia() {
     const fd = new FormData(); fd.append('foto', foto); setLoading(true)
     try {
       const { data } = await api.post('/ocr/leer-patente/', fd)
-      if (data.ok) { setPatente(data.patente); toast.success('Patente detectada') } else toast.error(data.detalle || 'No se pudo leer la patente')
+      if (data.ok) { setPatente(normalizarPatente(data.patente)); toast.success('Patente detectada') } else toast.error(data.detalle || 'No se pudo leer la patente')
     } finally { setLoading(false) }
   }
 
   const verificarPatente = async () => {
-    const normalizedPatente = patente.toUpperCase()
-    if (!patenteOk(normalizedPatente)) return toast.error('Patente inválida')
+    const normalizedPatente = normalizarPatente(patente)
+    if (!patenteEsValida(normalizedPatente)) return toast.error(MENSAJE_FORMATO_PATENTE)
     setLoading(true)
     try {
       const { data } = await api.post('/guardia/verificar-patente/', { patente: normalizedPatente })
@@ -159,6 +158,6 @@ export default function Guardia() {
       <div><label className="mb-1 block font-semibold" htmlFor="guard-document-number">Número de documento</label><div className="relative"><input id="guard-document-number" className={`input h-14 w-full text-xl ${mostrarEstadoRut ? 'pr-12' : ''} ${document.tipo_documento !== 'rut' ? 'uppercase' : ''}`} placeholder={document.tipo_documento === 'rut' ? '12.345.678-5' : 'PA123456'} value={document.numero_documento} onChange={event => updateDocument('numero_documento', event.target.value)} onBlur={() => updateDocument('numero_documento', formatearDocumento(document.tipo_documento, document.numero_documento))}/>{mostrarEstadoRut && (documentoEsValido('rut', document.numero_documento) ? <Check className="absolute right-4 top-1/2 -translate-y-1/2 text-emerald-600" aria-label="RUT válido"/> : <X className="absolute right-4 top-1/2 -translate-y-1/2 text-red-600" aria-label="RUT inválido"/>)}</div></div>
       <button disabled={loading} onClick={verificarDocumento} className="btn-primary h-16 w-full text-xl disabled:opacity-50"><UserRoundSearch/> Verificar documento</button>
       {loading ? <Spinner text="Procesando..."/> : authorizations.length > 1 && !selectedAuthorizationId ? <div className="rounded-2xl border-2 border-blue-400 bg-blue-50 p-4"><h2 className="flex items-center gap-2 text-xl font-black text-blue-900"><ListChecks/> SELECCIONA EL DESTINO</h2><div className="mt-3 grid gap-3">{authorizations.map((authorization, index) => { const details = authorizationDetails(authorization); return <button type="button" key={authorization.id ?? index} onClick={() => selectAuthorization(authorization)} className="min-h-20 rounded-xl border border-blue-300 bg-white p-4 text-left shadow-sm transition hover:bg-blue-100"><strong className="block text-lg">{details.name}</strong><span className="block">Unidad {details.unit} · {details.validity}</span></button> })}</div></div> : <><Result {...(results.visita || {})}/>{results.visita && <button type="button" className="btn-secondary mt-3 w-full justify-center" onClick={() => { setResults(current => ({ ...current, visita: null })); setScanning(true) }}><RotateCcw size={18}/> Escanear otro</button>}</>}
-    </section> : <section className="card min-h-[520px] space-y-5 p-6 sm:p-8" role="tabpanel"><div><h2 className="text-2xl font-bold">Verificar vehículo</h2><p className="mt-1 text-slate-500">Captura la patente o ingrésala manualmente.</p></div><CameraCapture onCapture={leerFoto}/><input className="input h-14 text-xl uppercase" aria-label="Patente del vehículo" placeholder="AABB11 o AA1111" value={patente} onChange={event => setPatente(event.target.value.toUpperCase())}/><button disabled={loading} onClick={verificarPatente} className="btn-primary h-16 w-full text-xl disabled:opacity-50"><Car/> Confirmar patente</button>{loading ? <Spinner text="Procesando..."/> : <Result {...(results.vehiculo || {})}/>}</section>}
+    </section> : <section className="card min-h-[520px] space-y-5 p-6 sm:p-8" role="tabpanel"><div><h2 className="text-2xl font-bold">Verificar vehículo</h2><p className="mt-1 text-slate-500">Captura la patente o ingrésala manualmente.</p></div><CameraCapture onCapture={leerFoto}/><input className="input h-14 text-xl uppercase" aria-label="Patente del vehículo" placeholder="Ej.: AB1234 o ABC12345" value={patente} onChange={event => setPatente(normalizarPatente(event.target.value))}/><button disabled={loading} onClick={verificarPatente} className="btn-primary h-16 w-full text-xl disabled:opacity-50"><Car/> Confirmar patente</button>{loading ? <Spinner text="Procesando..."/> : <Result {...(results.vehiculo || {})}/>}</section>}
   </div></Layout>
 }
