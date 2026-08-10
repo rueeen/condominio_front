@@ -1,7 +1,8 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { format, formatDistanceToNowStrict, isAfter, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { Car, Trash2, UserPlus } from 'lucide-react'
+import { QRCodeSVG } from 'qrcode.react'
+import { Car, QrCode, Share2, Trash2, UserPlus, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import toast from 'react-hot-toast'
@@ -35,6 +36,7 @@ export default function Propietario() {
   const [activeTab, setActiveTab] = useState('visitas')
   const [lists, setLists] = useState({ visitantes: { ...emptyPage }, vehiculos: { ...emptyPage } })
   const [estacionamientos, setEstacionamientos] = useState(null)
+  const [qrVisitor, setQrVisitor] = useState(null)
   const visitorForm = useForm({ resolver: zodResolver(visitorSchema), defaultValues: { tipo_documento: 'rut', numero_documento: '', pais_documento: '', nombre: '', fecha_fin: '' } })
   const carForm = useForm({ resolver: zodResolver(carSchema) })
 
@@ -91,6 +93,15 @@ export default function Propietario() {
   const espacios = Array.isArray(estacionamientos?.estacionamientos) ? estacionamientos.estacionamientos : []
   const visitorDocumentType = visitorForm.watch('tipo_documento')
   const visitorDocumentRegistration = visitorForm.register('numero_documento')
+  const qrExpired = qrVisitor?.fecha_fin && !isAfter(parseISO(qrVisitor.fecha_fin), new Date())
+  const qrValidity = qrVisitor?.fecha_fin ? format(parseISO(qrVisitor.fecha_fin), 'PPp', { locale: es }) : 'la vigencia configurada'
+  const shareQr = async () => {
+    const text = `Tu acceso a Condominio Seguro: ${qrVisitor.token_qr}. Válido hasta ${qrValidity}. Muestra este código en portería.`
+    if (navigator.share) {
+      try { await navigator.share({ title: 'Acceso de visita', text }); return } catch (error) { if (error.name === 'AbortError') return }
+    }
+    try { await navigator.clipboard.writeText(text); toast.success('Copiado al portapapeles') } catch { toast.error('No se pudo copiar el acceso') }
+  }
   const visitorCols = useMemo(() => [
     { header: 'Nombre', accessorKey: 'nombre' },
     { header: 'Tipo de documento', accessorKey: 'tipo_documento', cell: info => documentTypes.find(type => type.value === info.getValue())?.label || info.getValue() || '—' },
@@ -98,6 +109,7 @@ export default function Propietario() {
     { header: 'País', accessorKey: 'pais_documento', cell: info => info.getValue() || '—' },
     { header: 'Vigente hasta', accessorKey: 'fecha_fin', cell: info => info.getValue() ? `${format(parseISO(info.getValue()), 'PPp', { locale: es })} (${formatDistanceToNowStrict(parseISO(info.getValue()), { locale: es, addSuffix: true })})` : 'Vigencia predeterminada' },
     { header: 'Estado', cell: info => { const storedState = info.row.original.estado; const active = storedState ? ['vigente', 'activo', 'autorizado'].includes(storedState.toLowerCase()) : info.row.original.fecha_fin && isAfter(parseISO(info.row.original.fecha_fin), new Date()); const label = storedState || (active ? 'vigente' : 'expirada'); return <span className={active ? 'badge-green' : 'badge-gray'}>{label}</span> } },
+    { header: 'Acciones', cell: info => <button type="button" className="btn-secondary" disabled={!info.row.original.token_qr} onClick={() => setQrVisitor(info.row.original)} title={!info.row.original.token_qr ? 'Esta visita no tiene un código QR' : ''}><QrCode size={17}/> Ver QR</button> },
   ], [])
   const carCols = useMemo(() => [{ header: 'Patente', accessorKey: 'patente' }, { header: 'Estado', cell: info => <span title={info.row.original.motivo_rechazo || ''} className={info.row.original.estado === 'aprobado' ? 'badge-green' : info.row.original.estado === 'rechazado' ? 'badge-red' : 'badge-yellow'}>{info.row.original.estado}</span> }, { header: 'Acciones', cell: info => <button type="button" className="btn-danger" onClick={() => eliminarVehiculo(info.row.original.id)}><Trash2 size={15}/> Eliminar</button> }], [eliminarVehiculo])
   const tableProps = name => ({ ...lists[name], data: lists[name].results, onPrevious: () => fetchList(name, lists[name].previous), onNext: () => fetchList(name, lists[name].next) })
@@ -123,5 +135,15 @@ export default function Propietario() {
       {limiteAlcanzado && limitePatentes > 0 && <p className="mt-2 text-sm text-red-600">Ya alcanzaste el límite de {limitePatentes} {limitePatentes === 1 ? 'patente pendiente o aprobada' : 'patentes pendientes o aprobadas'}.</p>}
       <div className="mt-5"><Table {...tableProps('vehiculos')} columns={carCols} emptyMessage="No hay vehículos registrados."/></div>
     </section>}
+    {qrVisitor && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4" role="dialog" aria-modal="true" aria-labelledby="qr-title" onMouseDown={event => { if (event.target === event.currentTarget) setQrVisitor(null) }}>
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 text-center shadow-2xl">
+        <div className="flex items-center justify-between"><h2 id="qr-title" className="text-2xl font-black">Código de acceso</h2><button type="button" className="btn-secondary px-3" onClick={() => setQrVisitor(null)} aria-label="Cerrar"><X/></button></div>
+        {qrExpired ? <div className="my-8 rounded-xl bg-red-50 p-6 text-xl font-bold text-red-700">Esta autorización ya expiró</div> : <>
+          <div className="mx-auto my-6 w-fit rounded-xl border border-slate-200 bg-white p-4"><QRCodeSVG value={qrVisitor.token_qr} size={240} level="M" title={`Acceso de ${qrVisitor.nombre}`} /></div>
+          <p className="text-lg font-bold">{qrVisitor.nombre}</p><p className="mt-1 text-slate-600">Válido hasta {qrValidity}</p>
+          <button type="button" className="btn-primary mt-6 w-full" onClick={shareQr}><Share2 size={19}/> Compartir</button>
+        </>}
+      </div>
+    </div>}
   </div></Layout>
 }
