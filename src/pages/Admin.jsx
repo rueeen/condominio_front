@@ -20,6 +20,8 @@ export default function Admin() {
   const [guardandoEstacionamiento, setGuardandoEstacionamiento] = useState(false)
   const [nuevoGuardia, setNuevoGuardia] = useState({ username: '', first_name: '', last_name: '', password: '' })
   const [guardandoGuardia, setGuardandoGuardia] = useState(false)
+  const [nuevoPropietario, setNuevoPropietario] = useState({ username: '', password: '', first_name: '', last_name: '', torre: '', departamento: '' })
+  const [guardandoPropietario, setGuardandoPropietario] = useState(false)
 
   const fetchList = useCallback(async (name, url = `/${name}/`) => {
     setLists(current => ({ ...current, [name]: { ...current[name], loading: true, error: '' } }))
@@ -101,6 +103,31 @@ export default function Admin() {
     } catch (error) { toast.error(getApiErrorMessage(error, 'No se pudo registrar el guardia')) }
     finally { setGuardandoGuardia(false) }
   }
+
+  const crearPropietario = async event => {
+    event.preventDefault()
+    const torre = Number(nuevoPropietario.torre), departamento = Number(nuevoPropietario.departamento)
+    if (!nuevoPropietario.username.trim()) return toast.error('Ingresa el nombre de usuario')
+    if (!nuevoPropietario.first_name.trim()) return toast.error('Ingresa el nombre')
+    if (nuevoPropietario.password.length < 8) return toast.error('La contraseña debe tener al menos 8 caracteres')
+    if (!Number.isInteger(torre) || torre < 1 || torre > 25) return toast.error('La torre debe ser un número entero entre 1 y 25')
+    if (!Number.isInteger(departamento)) return toast.error('El departamento debe ser un número entero')
+    setGuardandoPropietario(true)
+    try {
+      await api.post('/propietarios/', {
+        username: nuevoPropietario.username.trim(),
+        password: nuevoPropietario.password,
+        first_name: nuevoPropietario.first_name.trim(),
+        last_name: nuevoPropietario.last_name.trim(),
+        torre,
+        departamento,
+      })
+      toast.success('Propietario registrado')
+      setNuevoPropietario({ username: '', password: '', first_name: '', last_name: '', torre: '', departamento: '' })
+      await fetchList('propietarios')
+    } catch (error) { toast.error(getApiErrorMessage(error, 'No se pudo registrar el propietario')) }
+    finally { setGuardandoPropietario(false) }
+  }
   const eliminarEstacionamiento = useCallback(async id => {
     try { await api.delete(`/estacionamientos/${id}/`); toast.success('Estacionamiento eliminado'); await Promise.all([fetchList('estacionamientos'), fetchList('propietarios')]) }
     catch (error) { toast.error(getApiErrorMessage(error, 'No se pudo eliminar el estacionamiento')) }
@@ -135,6 +162,15 @@ export default function Admin() {
     <section className="card"><h1 className="mb-4 text-2xl font-bold">Solicitudes pendientes</h1><Table {...tableProps('vehiculosPendientes')} columns={vehiculoCols} emptyMessage="No hay solicitudes pendientes."/></section>
     <section className="card"><h1 className="mb-4 text-2xl font-bold">Historial de ingresos</h1><Table {...tableProps('ingresos')} columns={ingresoCols}/></section>
     <section className="card"><h1 className="mb-4 text-2xl font-bold">Propietarios</h1>
+      <form className="mb-4 flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4" onSubmit={crearPropietario}>
+        <div><label className="block text-sm" htmlFor="propietario-username">Usuario</label><input id="propietario-username" className="input" required value={nuevoPropietario.username} onChange={event => setNuevoPropietario(current => ({ ...current, username: event.target.value }))}/></div>
+        <div><label className="block text-sm" htmlFor="propietario-password">Contraseña</label><input id="propietario-password" className="input" type="password" minLength={8} required value={nuevoPropietario.password} onChange={event => setNuevoPropietario(current => ({ ...current, password: event.target.value }))}/></div>
+        <div><label className="block text-sm" htmlFor="propietario-nombre">Nombre</label><input id="propietario-nombre" className="input" required value={nuevoPropietario.first_name} onChange={event => setNuevoPropietario(current => ({ ...current, first_name: event.target.value }))}/></div>
+        <div><label className="block text-sm" htmlFor="propietario-apellido">Apellido (opcional)</label><input id="propietario-apellido" className="input" value={nuevoPropietario.last_name} onChange={event => setNuevoPropietario(current => ({ ...current, last_name: event.target.value }))}/></div>
+        <div><label className="block text-sm" htmlFor="propietario-torre">Torre</label><input id="propietario-torre" className="input" type="number" min="1" max="25" required value={nuevoPropietario.torre} onChange={event => setNuevoPropietario(current => ({ ...current, torre: event.target.value }))}/></div>
+        <div><label className="block text-sm" htmlFor="propietario-departamento">Departamento</label><input id="propietario-departamento" className="input" type="number" required value={nuevoPropietario.departamento} onChange={event => setNuevoPropietario(current => ({ ...current, departamento: event.target.value }))}/></div>
+        <button className="btn-ok" disabled={guardandoPropietario}><Building2 size={16}/> {guardandoPropietario ? 'Registrando...' : 'Registrar propietario'}</button>
+      </form>
       {editando && <div className="mb-4 space-y-4 rounded-xl border border-[#4696e5]/30 bg-[#4696e5]/5 p-4">
         <form className="flex flex-wrap items-end gap-3" onSubmit={guardarPropietario}>
           <div><p className="mb-2 font-semibold">Editando a {editando.username}</p><label className="block text-sm" htmlFor="nombre">Nombre</label><input id="nombre" className="input" value={editando.first_name ?? ''} onChange={event => setEditando(current => ({ ...current, first_name: event.target.value }))}/></div>
