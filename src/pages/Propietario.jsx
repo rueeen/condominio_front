@@ -11,8 +11,8 @@ import api, { getApiErrorMessage, normalizeListResponse } from '../api'
 import Layout from '../components/Layout'
 import Table from '../components/Table'
 import { documentoEsValido, formatearDocumento } from '../utils/documento'
+import { MENSAJE_FORMATO_PATENTE, normalizarPatente, patenteEsValida } from '../utils/patente'
 
-const patente = /^([A-Z]{4}\d{2}|[A-Z]{2}\d{4})$/
 const documentTypes = [
   { value: 'rut', label: 'RUT chileno' },
   { value: 'pasaporte', label: 'Pasaporte' },
@@ -29,7 +29,7 @@ const visitorSchema = z.object({
   message: 'El RUT no es válido, revisa el dígito verificador',
   path: ['numero_documento'],
 })
-const carSchema = z.object({ patente: z.string().transform(value => value.toUpperCase()).refine(value => patente.test(value), 'Formato: AABB11 o AA1111') })
+const carSchema = z.object({ patente: z.string().transform(normalizarPatente).refine(patenteEsValida, MENSAJE_FORMATO_PATENTE) })
 const emptyPage = { results: [], count: 0, next: null, previous: null, loading: true, error: '' }
 
 export default function Propietario() {
@@ -93,6 +93,7 @@ export default function Propietario() {
   const espacios = Array.isArray(estacionamientos?.estacionamientos) ? estacionamientos.estacionamientos : []
   const visitorDocumentType = visitorForm.watch('tipo_documento')
   const visitorDocumentRegistration = visitorForm.register('numero_documento')
+  const carRegistration = carForm.register('patente')
   const qrExpired = qrVisitor?.fecha_fin && !isAfter(parseISO(qrVisitor.fecha_fin), new Date())
   const qrValidity = qrVisitor?.fecha_fin ? format(parseISO(qrVisitor.fecha_fin), 'PPp', { locale: es }) : 'la vigencia configurada'
   const shareQr = async () => {
@@ -131,7 +132,7 @@ export default function Propietario() {
       </form><div className="mt-5"><Table {...tableProps('visitantes')} columns={visitorCols} emptyMessage="No hay visitantes registrados."/></div>
     </section> : <section id="panel-vehiculos" role="tabpanel" aria-labelledby="tab-vehiculos" className="card"><h2 className="section-title"><Car/> Vehículos</h2>
       {limiteConocido && (espacios.length > 0 ? <p className="mb-3 text-sm text-slate-600">Tienes {espacios.length} {espacios.length === 1 ? 'estacionamiento' : 'estacionamientos'} ({espacios.join(', ')}) — puedes registrar hasta {limitePatentes} {limitePatentes === 1 ? 'vehículo' : 'vehículos'}.</p> : <p className="mb-3 text-sm text-red-600">No tienes estacionamientos asignados — no puedes registrar vehículos. Contacta al administrador.</p>)}
-      <form onSubmit={carForm.handleSubmit(crearVehiculo)} className="flex flex-col gap-3 sm:flex-row"><div className="grow"><input className="input h-14 w-full text-lg" placeholder="Patente" {...carForm.register('patente')}/>{carForm.formState.errors.patente && <p className="mt-1 text-sm text-red-600">{carForm.formState.errors.patente.message}</p>}</div><button disabled={limiteAlcanzado} className="btn-primary h-14 self-stretch disabled:opacity-50 sm:self-start">Solicitar</button></form>
+      <form onSubmit={carForm.handleSubmit(crearVehiculo)} className="flex flex-col gap-3 sm:flex-row"><div className="grow"><input className="input h-14 w-full text-lg uppercase" placeholder="Ej.: AB1234 o ABC12345" {...carRegistration} onChange={event => { event.target.value = normalizarPatente(event.target.value); carRegistration.onChange(event) }}/>{carForm.formState.errors.patente && <p className="mt-1 text-sm text-red-600">{carForm.formState.errors.patente.message}</p>}</div><button disabled={limiteAlcanzado} className="btn-primary h-14 self-stretch disabled:opacity-50 sm:self-start">Solicitar</button></form>
       {limiteAlcanzado && limitePatentes > 0 && <p className="mt-2 text-sm text-red-600">Ya alcanzaste el límite de {limitePatentes} {limitePatentes === 1 ? 'patente pendiente o aprobada' : 'patentes pendientes o aprobadas'}.</p>}
       <div className="mt-5"><Table {...tableProps('vehiculos')} columns={carCols} emptyMessage="No hay vehículos registrados."/></div>
     </section>}
