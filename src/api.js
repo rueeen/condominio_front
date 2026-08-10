@@ -20,7 +20,15 @@ export function normalizeListResponse(data) {
 
 export function getApiErrorMessage(error, fallback) {
   const data = error.response?.data
-  if (typeof data === 'string') return data
+  const contentType = error.response?.headers?.['content-type'] || ''
+
+  if (typeof data === 'string') {
+    // Si el backend devolvió una página de error HTML (500/502/504, un
+    // proxy caído, etc.) en vez de JSON, nunca mostrar ese HTML crudo —
+    // cae al mensaje genérico.
+    const pareceHtml = contentType.includes('text/html') || /^\s*</.test(data)
+    return pareceHtml ? fallback : data
+  }
   if (Array.isArray(data)) return data[0] || fallback
   if (data && typeof data === 'object') {
     for (const value of Object.values(data)) {
