@@ -9,6 +9,7 @@ import { z } from 'zod'
 import api, { getApiErrorMessage, normalizeListResponse } from '../api'
 import Layout from '../components/Layout'
 import Table from '../components/Table'
+import { documentoEsValido, formatearDocumento } from '../utils/documento'
 
 const patente = /^([A-Z]{4}\d{2}|[A-Z]{2}\d{4})$/
 const documentTypes = [
@@ -23,6 +24,9 @@ const visitorSchema = z.object({
   pais_documento: z.string().trim().max(80, 'Máximo 80 caracteres').optional(),
   nombre: z.string().min(2, 'Ingresa al menos 2 caracteres'),
   fecha_fin: z.preprocess(value => value === '' ? undefined : value, z.string().min(1).optional()),
+}).refine(data => documentoEsValido(data.tipo_documento, data.numero_documento), {
+  message: 'El RUT no es válido, revisa el dígito verificador',
+  path: ['numero_documento'],
 })
 const carSchema = z.object({ patente: z.string().transform(value => value.toUpperCase()).refine(value => patente.test(value), 'Formato: AABB11 o AA1111') })
 const emptyPage = { results: [], count: 0, next: null, previous: null, loading: true, error: '' }
@@ -85,6 +89,7 @@ export default function Propietario() {
   const limiteAlcanzado = limiteConocido && activeCars >= limitePatentes
   const espacios = Array.isArray(estacionamientos?.estacionamientos) ? estacionamientos.estacionamientos : []
   const visitorDocumentType = visitorForm.watch('tipo_documento')
+  const visitorDocumentRegistration = visitorForm.register('numero_documento')
   const visitorCols = useMemo(() => [
     { header: 'Nombre', accessorKey: 'nombre' },
     { header: 'Tipo de documento', accessorKey: 'tipo_documento', cell: info => documentTypes.find(type => type.value === info.getValue())?.label || info.getValue() || '—' },
@@ -100,7 +105,7 @@ export default function Propietario() {
     <section className="card"><h2 className="section-title"><UserPlus/> Visitantes</h2>
       <form onSubmit={visitorForm.handleSubmit(crearVisitante)} className="grid gap-3 md:grid-cols-2">
         <div><label className="mb-1 block text-sm font-medium" htmlFor="visitor-document-type">Tipo de documento</label><select id="visitor-document-type" className="input w-full" {...visitorForm.register('tipo_documento')} onChange={event => { visitorForm.setValue('tipo_documento', event.target.value); if (event.target.value === 'rut') visitorForm.setValue('pais_documento', '') }}>{documentTypes.map(type => <option key={type.value} value={type.value}>{type.label}</option>)}</select></div>
-        <div><label className="mb-1 block text-sm font-medium" htmlFor="visitor-document-number">Número de documento</label><input id="visitor-document-number" className={`input w-full ${visitorDocumentType !== 'rut' ? 'uppercase' : ''}`} placeholder={visitorDocumentType === 'rut' ? '12.345.678-5' : 'PA123456'} {...visitorForm.register('numero_documento')}/>{visitorForm.formState.errors.numero_documento && <p className="mt-1 text-sm text-red-600">{visitorForm.formState.errors.numero_documento.message}</p>}</div>
+        <div><label className="mb-1 block text-sm font-medium" htmlFor="visitor-document-number">Número de documento</label><input id="visitor-document-number" className={`input w-full ${visitorDocumentType !== 'rut' ? 'uppercase' : ''}`} placeholder={visitorDocumentType === 'rut' ? '12.345.678-5' : 'PA123456'} {...visitorDocumentRegistration} onBlur={event => { event.target.value = formatearDocumento(visitorDocumentType, event.target.value); visitorDocumentRegistration.onChange(event); visitorDocumentRegistration.onBlur(event) }}/>{visitorForm.formState.errors.numero_documento && <p className="mt-1 text-sm text-red-600">{visitorForm.formState.errors.numero_documento.message}</p>}</div>
         {visitorDocumentType !== 'rut' && <div><label className="mb-1 block text-sm font-medium" htmlFor="visitor-document-country">País emisor (opcional)</label><input id="visitor-document-country" className="input w-full" placeholder="Ej.: Perú" {...visitorForm.register('pais_documento')}/>{visitorForm.formState.errors.pais_documento && <p className="mt-1 text-sm text-red-600">{visitorForm.formState.errors.pais_documento.message}</p>}</div>}
         <div><label className="mb-1 block text-sm font-medium" htmlFor="visitor-name">Nombre</label><input id="visitor-name" className="input w-full" placeholder="Nombre" {...visitorForm.register('nombre')}/>{visitorForm.formState.errors.nombre && <p className="mt-1 text-sm text-red-600">{visitorForm.formState.errors.nombre.message}</p>}</div>
         <div className="md:col-span-2"><label className="mb-1 block text-sm font-medium" htmlFor="fecha-fin">Vigente hasta (opcional)</label><input id="fecha-fin" className="input w-full" type="datetime-local" {...visitorForm.register('fecha_fin')}/></div>
