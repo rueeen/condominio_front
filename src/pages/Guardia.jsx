@@ -37,6 +37,11 @@ const authorizedVisitDetails = details => <>
   <span className="mt-2 block text-lg sm:text-xl">{details.validity}</span>
 </>
 
+const authorizedResidentDetails = details => <>
+  <span className="block text-2xl font-bold sm:text-3xl">{details.name}</span>
+  <span className="mt-1 block text-2xl font-bold sm:text-3xl">Unidad {details.unit}</span>
+</>
+
 const getAuthorizations = data => {
   if (Array.isArray(data)) return data
   if (Array.isArray(data?.autorizaciones)) return data.autorizaciones
@@ -112,12 +117,13 @@ export default function Guardia() {
       const { data } = await api.post('/guardia/verificar-qr/', { token })
       const allowed = data.permitido ?? data.autorizado ?? false
       const details = authorizationDetails(data)
+      const isResident = allowed && data.tipo === 'residente'
       setResults(current => ({ ...current, visita: {
         status: allowed ? 'authorized' : 'rejected',
-        title: allowed ? 'VISITA AUTORIZADA' : 'VISITA NO AUTORIZADA',
-        details: allowed ? authorizedVisitDetails(details) : (data.detalle || 'El código no está vigente'),
+        title: allowed ? (isResident ? 'RESIDENTE AUTORIZADO' : 'VISITA AUTORIZADA') : 'VISITA NO AUTORIZADA',
+        details: allowed ? (isResident ? authorizedResidentDetails(details) : authorizedVisitDetails(details)) : (data.detalle || 'El código no está vigente'),
       } }))
-      toast[allowed ? 'success' : 'error'](allowed ? 'Visita vigente' : 'Visita no autorizada')
+      toast[allowed ? 'success' : 'error'](allowed ? (isResident ? 'Residente autorizado' : 'Visita vigente') : 'Visita no autorizada')
     } catch (error) {
       const networkError = !error.response
       const denied = error.response && [400, 403, 404].includes(error.response.status)

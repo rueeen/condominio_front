@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { format, formatDistanceToNowStrict, isAfter, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { QRCodeSVG } from 'qrcode.react'
-import { Car, QrCode, Share2, Trash2, UserPlus, X } from 'lucide-react'
+import { Car, QrCode, RefreshCw, Save, Share2, Trash2, UserCircle, UserPlus, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import toast from 'react-hot-toast'
@@ -40,6 +40,10 @@ const visitorSchema = z.object({
   path: ['fecha_fin'],
 })
 const carSchema = z.object({ patente: z.string().transform(normalizarPatente).refine(patenteEsValida, MENSAJE_FORMATO_PATENTE) })
+const profileSchema = z.object({
+  email: z.string().trim().email('Ingresa un email válido'),
+  telefono: z.string().trim().refine(value => value === '' || /^\+?[\d\s-]+$/.test(value) && /\d/.test(value), 'Usa solo dígitos, espacios, guiones y un + inicial'),
+})
 const emptyPage = { results: [], count: 0, next: null, previous: null, loading: true, error: '' }
 
 export default function Propietario() {
@@ -49,8 +53,13 @@ export default function Propietario() {
   const [qrVisitor, setQrVisitor] = useState(null)
   const [eliminandoVisitante, setEliminandoVisitante] = useState(null)
   const [eliminandoVehiculo, setEliminandoVehiculo] = useState(null)
+  const [profile, setProfile] = useState(null)
+  const [profileLoading, setProfileLoading] = useState(true)
+  const [profileError, setProfileError] = useState('')
+  const [regeneratingQr, setRegeneratingQr] = useState(false)
   const visitorForm = useForm({ resolver: zodResolver(visitorSchema), defaultValues: { tipo_documento: 'rut', numero_documento: '', pais_documento: '', nombre: '', tipo_visita: 'temporal', fecha_fin: '' } })
   const carForm = useForm({ resolver: zodResolver(carSchema) })
+  const profileForm = useForm({ resolver: zodResolver(profileSchema), defaultValues: { email: '', telefono: '' } })
 
   const fetchList = useCallback(async (name, url = `/${name}/`) => {
     setLists(current => ({ ...current, [name]: { ...current[name], loading: true, error: '' } }))
@@ -62,11 +71,24 @@ export default function Propietario() {
     }
   }, [])
 
+  const fetchProfile = useCallback(async () => {
+    setProfileLoading(true)
+    setProfileError('')
+    try {
+      const { data } = await api.get('/perfil/')
+      setProfile(data)
+      profileForm.reset({ email: data.email || '', telefono: data.telefono || '' })
+    } catch (error) {
+      setProfileError(getApiErrorMessage(error, 'No se pudo cargar tu perfil'))
+    } finally { setProfileLoading(false) }
+  }, [profileForm])
+
   useEffect(() => {
     fetchList('visitantes')
     fetchList('vehiculos')
     api.get('/mis-estacionamientos/').then(response => setEstacionamientos(response.data)).catch(() => setEstacionamientos(null))
-  }, [fetchList])
+    fetchProfile()
+  }, [fetchList, fetchProfile])
 
   const crearVisitante = async data => {
     const payload = {
@@ -111,6 +133,27 @@ export default function Propietario() {
     } catch (error) { toast.error(getApiErrorMessage(error, 'No se pudo enviar la solicitud')) }
   }
 
+  const guardarPerfil = async data => {
+    try {
+      const response = await api.patch('/perfil/', { email: data.email.trim(), telefono: data.telefono.trim() })
+      const updatedProfile = { ...profile, ...response.data }
+      setProfile(updatedProfile)
+      profileForm.reset({ email: updatedProfile.email || '', telefono: updatedProfile.telefono || '' })
+      toast.success('Perfil actualizado')
+    } catch (error) { toast.error(getApiErrorMessage(error, 'No se pudo guardar tu perfil')) }
+  }
+
+  const regenerarQr = async () => {
+    if (!window.confirm('Tu código actual dejará de funcionar de inmediato. Úsalo solo si perdiste tu teléfono o crees que alguien más tiene tu código.')) return
+    setRegeneratingQr(true)
+    try {
+      await api.post('/perfil/regenerar-qr/')
+      await fetchProfile()
+      toast.success('Código QR regenerado')
+    } catch (error) { toast.error(getApiErrorMessage(error, 'No se pudo regenerar el código')) }
+    finally { setRegeneratingQr(false) }
+  }
+
   const { vehiculos } = lists
   const activeCars = vehiculos.results.filter(vehicle => ['pendiente', 'aprobado'].includes(vehicle.estado)).length
   const limitePatentes = estacionamientos?.limite_patentes
@@ -132,6 +175,13 @@ export default function Propietario() {
     }
     try { await navigator.clipboard.writeText(text); toast.success('Copiado al portapapeles') } catch { toast.error('No se pudo copiar el acceso') }
   }
+  const shareResidentQr = async () => {
+    const text = `Mi identificación de residente de Condominio Seguro: ${profile.token_qr}. Muestra este código en portería.`
+    if (navigator.share) {
+      try { await navigator.share({ title: 'Mi identificación de residente', text }); return } catch (error) { if (error.name === 'AbortError') return }
+    }
+    try { await navigator.clipboard.writeText(text); toast.success('Identificación copiada al portapapeles') } catch { toast.error('No se pudo copiar la identificación') }
+  }
   const visitorCols = useMemo(() => [
     { header: 'Nombre', accessorKey: 'nombre' },
     { header: 'Tipo de documento', accessorKey: 'tipo_documento', cell: info => documentTypes.find(type => type.value === info.getValue())?.label || info.getValue() || '—' },
@@ -145,9 +195,10 @@ export default function Propietario() {
   const tableProps = name => ({ ...lists[name], data: lists[name].results, onPrevious: () => fetchList(name, lists[name].previous), onNext: () => fetchList(name, lists[name].next) })
 
   return <Layout><div className="mx-auto max-w-5xl">
-    <div className="mb-5 grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm" role="tablist" aria-label="Gestión de propietario">
+    <div className="mb-5 grid grid-cols-3 gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm" role="tablist" aria-label="Gestión de propietario">
       <button type="button" id="tab-visitas" role="tab" aria-selected={activeTab === 'visitas'} aria-controls="panel-visitas" onClick={() => setActiveTab('visitas')} className={`inline-flex min-h-14 items-center justify-center gap-2 rounded-md px-3 font-bold transition ${activeTab === 'visitas' ? 'bg-[#4696e5] text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}><UserPlus size={21}/> <span>Visitas</span></button>
       <button type="button" id="tab-vehiculos" role="tab" aria-selected={activeTab === 'vehiculos'} aria-controls="panel-vehiculos" onClick={() => setActiveTab('vehiculos')} className={`inline-flex min-h-14 items-center justify-center gap-2 rounded-md px-3 font-bold transition ${activeTab === 'vehiculos' ? 'bg-[#4696e5] text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}><Car size={21}/> <span>Vehículos</span></button>
+      <button type="button" id="tab-perfil" role="tab" aria-selected={activeTab === 'perfil'} aria-controls="panel-perfil" onClick={() => setActiveTab('perfil')} className={`inline-flex min-h-14 items-center justify-center gap-2 rounded-md px-3 font-bold transition ${activeTab === 'perfil' ? 'bg-[#4696e5] text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}><UserCircle size={21}/> <span>Mi Perfil</span></button>
     </div>
     {activeTab === 'visitas' ? <section id="panel-visitas" role="tabpanel" aria-labelledby="tab-visitas" className="card"><h2 className="section-title"><UserPlus/> Visitantes</h2>
       <form onSubmit={visitorForm.handleSubmit(crearVisitante)} className="grid gap-3 md:grid-cols-2">
@@ -162,11 +213,25 @@ export default function Propietario() {
         <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800 md:col-span-2">{visitorType === 'permanente' ? 'Este QR no vence. Puedes eliminar la visita cuando ya no la necesites.' : visitorEndDate ? `Vence el ${format(new Date(visitorEndDate), "d 'de' MMMM 'a las' HH:mm", { locale: es })} — ${formatDistanceToNowStrict(new Date(visitorEndDate), { locale: es, addSuffix: true })}.` : 'Sin fecha, el QR vence 5 horas después de crear la visita.'}</p>
         <button className="btn-primary h-14 md:col-span-2">Crear visitante</button>
       </form><div className="mt-5"><Table {...tableProps('visitantes')} columns={visitorCols} emptyMessage="No hay visitantes registrados."/></div>
-    </section> : <section id="panel-vehiculos" role="tabpanel" aria-labelledby="tab-vehiculos" className="card"><h2 className="section-title"><Car/> Vehículos</h2>
+    </section> : activeTab === 'vehiculos' ? <section id="panel-vehiculos" role="tabpanel" aria-labelledby="tab-vehiculos" className="card"><h2 className="section-title"><Car/> Vehículos</h2>
       {limiteConocido && (espacios.length > 0 ? <p className="mb-3 text-sm text-slate-600">Tienes {espacios.length} {espacios.length === 1 ? 'estacionamiento' : 'estacionamientos'} ({espacios.join(', ')}) — puedes registrar hasta {limitePatentes} {limitePatentes === 1 ? 'vehículo' : 'vehículos'}.</p> : <p className="mb-3 text-sm text-red-600">No tienes estacionamientos asignados — no puedes registrar vehículos. Contacta al administrador.</p>)}
       <form onSubmit={carForm.handleSubmit(crearVehiculo)} className="flex flex-col gap-3 sm:flex-row"><div className="grow"><input className="input h-14 w-full text-lg uppercase" placeholder="Ej.: AB1234 o ABC12345" {...carRegistration} onChange={event => { event.target.value = normalizarPatente(event.target.value); carRegistration.onChange(event) }}/>{carForm.formState.errors.patente && <p className="mt-1 text-sm text-red-600">{carForm.formState.errors.patente.message}</p>}</div><button disabled={limiteAlcanzado} className="btn-primary h-14 self-stretch disabled:opacity-50 sm:self-start">Solicitar</button></form>
       {limiteAlcanzado && limitePatentes > 0 && <p className="mt-2 text-sm text-red-600">Ya alcanzaste el límite de {limitePatentes} {limitePatentes === 1 ? 'patente pendiente o aprobada' : 'patentes pendientes o aprobadas'}.</p>}
       <div className="mt-5"><Table {...tableProps('vehiculos')} columns={carCols} emptyMessage="No hay vehículos registrados."/></div>
+    </section> : <section id="panel-perfil" role="tabpanel" aria-labelledby="tab-perfil" className="grid gap-5 lg:grid-cols-2">
+      <div className="card text-center"><h2 className="section-title justify-center"><QrCode/> Mi código QR de residente</h2>
+        {profileLoading ? <p className="py-12 text-slate-500">Cargando perfil...</p> : profileError ? <div className="py-8"><p className="text-red-600">{profileError}</p><button type="button" className="btn-secondary mt-4" onClick={fetchProfile}>Reintentar</button></div> : <>
+          {profile?.token_qr ? <div className="mx-auto my-6 w-fit rounded-xl border border-slate-200 bg-white p-4"><QRCodeSVG value={profile.token_qr} size={240} level="M" title="Mi identificación de residente" /></div> : <p className="my-8 rounded-lg bg-amber-50 p-4 text-amber-800">No tienes un código QR disponible.</p>}
+          <p className="text-slate-600">Muestra este código en portería para identificarte. No vence.</p>
+          <div className="mt-6 grid gap-3 sm:grid-cols-2"><button type="button" className="btn-primary justify-center" disabled={!profile?.token_qr} onClick={shareResidentQr}><Share2 size={19}/> Guardar o compartir</button><button type="button" className="btn-secondary justify-center disabled:opacity-50" disabled={regeneratingQr} onClick={regenerarQr}><RefreshCw size={19} className={regeneratingQr ? 'animate-spin' : ''}/> {regeneratingQr ? 'Regenerando...' : 'Regenerar código'}</button></div>
+        </>}
+      </div>
+      <div className="card"><h2 className="section-title"><UserCircle/> Mis datos</h2>
+        {profileLoading ? <p className="py-12 text-slate-500">Cargando datos...</p> : profileError ? <p className="py-8 text-red-600">{profileError}</p> : <>
+          <dl className="mb-6 grid gap-4 rounded-xl bg-slate-50 p-4 sm:grid-cols-2"><div><dt className="text-sm font-medium text-slate-500">Usuario</dt><dd className="mt-1 font-bold">{profile?.username || '—'}</dd></div><div><dt className="text-sm font-medium text-slate-500">Nombre completo</dt><dd className="mt-1 font-bold">{[profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || '—'}</dd></div><div className="sm:col-span-2"><dt className="text-sm font-medium text-slate-500">Unidad</dt><dd className="mt-1 font-bold">Torre {profile?.torre || '—'}, Depto {profile?.departamento || profile?.unidad || '—'}</dd></div></dl>
+          <form className="grid gap-4" onSubmit={profileForm.handleSubmit(guardarPerfil)}><div><label className="mb-1 block text-sm font-medium" htmlFor="profile-email">Email</label><input id="profile-email" type="email" className="input w-full" {...profileForm.register('email')}/>{profileForm.formState.errors.email && <p className="mt-1 text-sm text-red-600">{profileForm.formState.errors.email.message}</p>}</div><div><label className="mb-1 block text-sm font-medium" htmlFor="profile-phone">Teléfono</label><input id="profile-phone" type="tel" className="input w-full" placeholder="+56 9 1234-5678" {...profileForm.register('telefono')}/>{profileForm.formState.errors.telefono && <p className="mt-1 text-sm text-red-600">{profileForm.formState.errors.telefono.message}</p>}</div><button className="btn-primary justify-center disabled:opacity-50" disabled={profileForm.formState.isSubmitting}><Save size={19}/> {profileForm.formState.isSubmitting ? 'Guardando...' : 'Guardar'}</button></form>
+        </>}
+      </div>
     </section>}
     {qrVisitor && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4" role="dialog" aria-modal="true" aria-labelledby="qr-title" onMouseDown={event => { if (event.target === event.currentTarget) setQrVisitor(null) }}>
       <div className="w-full max-w-md rounded-2xl bg-white p-6 text-center shadow-2xl">
