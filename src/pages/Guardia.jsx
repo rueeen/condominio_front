@@ -74,13 +74,13 @@ export default function Guardia() {
   }
 
   const verificarDocumento = async () => {
-    const number = document.numero_documento.trim().toUpperCase()
-    if (number.length < 3) return toast.error('Ingresa un número de documento válido')
-    const payload = { tipo_documento: document.tipo_documento, numero_documento: number }
+    const numeroDocumento = document.numero_documento.trim().toUpperCase()
+    if (!documentoEsValido(document.tipo_documento, numeroDocumento)) return toast.error('Ingresa un número de documento válido')
+    const payload = { tipo_documento: document.tipo_documento, numero_documento: numeroDocumento }
     if (document.tipo_documento !== 'rut' && document.pais_documento.trim()) payload.pais_documento = document.pais_documento.trim()
     setLoading(true); setAuthorizations([]); setSelectedAuthorizationId(null); setResults(current => ({ ...current, visita: null }))
     try {
-      const { data } = await api.post('/guardia/verificar-rut/', payload)
+      const { data } = await api.post('/guardia/verificar-documento/', payload)
       const matches = getAuthorizations(data)
       if (matches.length === 0) {
         setResults(current => ({ ...current, visita: { status: 'rejected', title: 'VISITA NO AUTORIZADA', details: data?.detalle || 'No hay autorizaciones vigentes' } }))
