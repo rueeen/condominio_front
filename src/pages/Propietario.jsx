@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { format, formatDistanceToNowStrict, isAfter, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { QRCodeSVG } from 'qrcode.react'
-import { Car, QrCode, RefreshCw, Save, Share2, Trash2, UserCircle, UserPlus, X } from 'lucide-react'
+import { Car, Mail, QrCode, RefreshCw, Save, Share2, Trash2, UserCircle, UserPlus, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import toast from 'react-hot-toast'
@@ -56,6 +56,7 @@ export default function Propietario() {
   const [profile, setProfile] = useState(null)
   const [profileLoading, setProfileLoading] = useState(true)
   const [profileError, setProfileError] = useState('')
+  const [contactReminderDismissed, setContactReminderDismissed] = useState(false)
   const [regeneratingQr, setRegeneratingQr] = useState(false)
   const visitorForm = useForm({ resolver: zodResolver(visitorSchema), defaultValues: { tipo_documento: 'rut', numero_documento: '', pais_documento: '', nombre: '', tipo_visita: 'temporal', fecha_fin: '' } })
   const carForm = useForm({ resolver: zodResolver(carSchema) })
@@ -168,6 +169,7 @@ export default function Propietario() {
   const qrIsPermanent = qrVisitor?.fecha_fin == null
   const qrExpired = !qrIsPermanent && !isAfter(parseISO(qrVisitor.fecha_fin), new Date())
   const qrValidity = qrIsPermanent ? 'Sin vencimiento' : `Válido hasta ${format(parseISO(qrVisitor.fecha_fin), 'PPp', { locale: es })}`
+  const showContactReminder = !profileLoading && !profileError && profile && !profile.email?.trim() && !profile.telefono?.trim() && !contactReminderDismissed
   const shareQr = async () => {
     const text = `Tu acceso a Condominio Seguro: ${qrVisitor.token_qr}. ${qrValidity}. Muestra este código en portería.`
     if (navigator.share) {
@@ -200,7 +202,14 @@ export default function Propietario() {
       <button type="button" id="tab-vehiculos" role="tab" aria-selected={activeTab === 'vehiculos'} aria-controls="panel-vehiculos" onClick={() => setActiveTab('vehiculos')} className={`inline-flex min-h-14 items-center justify-center gap-2 rounded-md px-3 font-bold transition ${activeTab === 'vehiculos' ? 'bg-[#4696e5] text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}><Car size={21}/> <span>Vehículos</span></button>
       <button type="button" id="tab-perfil" role="tab" aria-selected={activeTab === 'perfil'} aria-controls="panel-perfil" onClick={() => setActiveTab('perfil')} className={`inline-flex min-h-14 items-center justify-center gap-2 rounded-md px-3 font-bold transition ${activeTab === 'perfil' ? 'bg-[#4696e5] text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}><UserCircle size={21}/> <span>Mi Perfil</span></button>
     </div>
-    {activeTab === 'visitas' ? <section id="panel-visitas" role="tabpanel" aria-labelledby="tab-visitas" className="card"><h2 className="section-title"><UserPlus/> Visitantes</h2>
+    {activeTab === 'visitas' ? <section id="panel-visitas" role="tabpanel" aria-labelledby="tab-visitas" className="card">
+      {showContactReminder && <div className="mb-5 flex items-center gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-blue-900" role="status">
+        <Mail className="shrink-0" size={20} aria-hidden="true"/>
+        <p className="grow text-sm"><span className="font-bold">Completa tus datos de contacto.</span>{' '}Ayuda a la administración a comunicarse contigo ante una emergencia.</p>
+        <button type="button" className="shrink-0 font-bold text-[#317fcf] underline underline-offset-2 hover:text-blue-800" onClick={() => setActiveTab('perfil')}>Ir a Mi Perfil</button>
+        <button type="button" className="shrink-0 rounded-md p-1 text-blue-700 hover:bg-blue-100" onClick={() => setContactReminderDismissed(true)} aria-label="Descartar recordatorio"><X size={18}/></button>
+      </div>}
+      <h2 className="section-title"><UserPlus/> Visitantes</h2>
       <form onSubmit={visitorForm.handleSubmit(crearVisitante)} className="grid gap-3 md:grid-cols-2">
         <div><label className="mb-1 block text-sm font-medium" htmlFor="visitor-document-type">Tipo de documento</label><select id="visitor-document-type" className="input w-full" {...visitorForm.register('tipo_documento')} onChange={event => { visitorForm.setValue('tipo_documento', event.target.value); if (event.target.value === 'rut') visitorForm.setValue('pais_documento', '') }}>{documentTypes.map(type => <option key={type.value} value={type.value}>{type.label}</option>)}</select></div>
         <div><label className="mb-1 block text-sm font-medium" htmlFor="visitor-document-number">Número de documento</label><input id="visitor-document-number" className={`input h-14 w-full text-lg ${visitorDocumentType !== 'rut' ? 'uppercase' : ''}`} placeholder={visitorDocumentType === 'rut' ? '12.345.678-5' : 'PA123456'} {...visitorDocumentRegistration} onBlur={event => { event.target.value = formatearDocumento(visitorDocumentType, event.target.value); visitorDocumentRegistration.onChange(event); visitorDocumentRegistration.onBlur(event) }}/>{visitorForm.formState.errors.numero_documento && <p className="mt-1 text-sm text-red-600">{visitorForm.formState.errors.numero_documento.message}</p>}</div>
