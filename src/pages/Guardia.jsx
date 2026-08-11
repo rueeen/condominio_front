@@ -31,6 +31,12 @@ function Result({ status, title, details }) {
   </div>
 }
 
+const authorizedVisitDetails = details => <>
+  <span className="block text-2xl font-bold sm:text-3xl">{details.name}</span>
+  <span className="mt-1 block text-2xl font-bold sm:text-3xl">Unidad {details.unit}</span>
+  <span className="mt-2 block text-lg sm:text-xl">{details.validity}</span>
+</>
+
 const getAuthorizations = data => {
   if (Array.isArray(data)) return data
   if (Array.isArray(data?.autorizaciones)) return data.autorizaciones
@@ -78,7 +84,7 @@ export default function Guardia() {
         const authorization = matches[0]
         const details = authorizationDetails(authorization)
         setSelectedAuthorizationId(authorization.id)
-        setResults(current => ({ ...current, visita: { status: 'authorized', title: 'VISITA AUTORIZADA', details: `${details.name} · Unidad ${details.unit} · ${details.validity}` } }))
+        setResults(current => ({ ...current, visita: { status: 'authorized', title: 'VISITA AUTORIZADA', details: authorizedVisitDetails(details) } }))
         toast.success('Visita vigente')
       } else {
         setAuthorizations(matches)
@@ -93,7 +99,7 @@ export default function Guardia() {
   const selectAuthorization = authorization => {
     const details = authorizationDetails(authorization)
     setSelectedAuthorizationId(authorization.id)
-    setResults(current => ({ ...current, visita: { status: 'authorized', title: 'VISITA AUTORIZADA', details: `${details.name} · Unidad ${details.unit} · ${details.validity}` } }))
+    setResults(current => ({ ...current, visita: { status: 'authorized', title: 'VISITA AUTORIZADA', details: authorizedVisitDetails(details) } }))
   }
 
   const verificarQr = useCallback(async token => {
@@ -109,7 +115,7 @@ export default function Guardia() {
       setResults(current => ({ ...current, visita: {
         status: allowed ? 'authorized' : 'rejected',
         title: allowed ? 'VISITA AUTORIZADA' : 'VISITA NO AUTORIZADA',
-        details: allowed ? `${details.name} · Unidad ${details.unit} · ${details.validity}` : (data.detalle || 'El código no está vigente'),
+        details: allowed ? authorizedVisitDetails(details) : (data.detalle || 'El código no está vigente'),
       } }))
       toast[allowed ? 'success' : 'error'](allowed ? 'Visita vigente' : 'Visita no autorizada')
     } catch (error) {
