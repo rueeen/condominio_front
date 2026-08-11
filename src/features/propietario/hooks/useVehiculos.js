@@ -10,6 +10,18 @@ export default function useVehiculos() {
   const fetchPage = useCallback(async (url = '/vehiculos/') => { setPage(current => ({ ...current, loading: true, error: '' })); try { const response = await api.get(url); setPage({ ...normalizeListResponse(response.data), loading: false, error: '' }) } catch (error) { setPage(current => ({ ...current, loading: false, error: getApiErrorMessage(error, 'No se pudieron cargar los registros') })) } }, [])
   useEffect(() => { Promise.resolve().then(fetchPage); api.get('/mis-estacionamientos/').then(response => setEstacionamientos(response.data)).catch(() => setEstacionamientos(null)) }, [fetchPage])
   const crear = async data => { try { await api.post('/vehiculos/', data); toast.success('Solicitud enviada'); form.reset(); await fetchPage() } catch (error) { toast.error(getApiErrorMessage(error, 'No se pudo enviar la solicitud')) } }
-  const eliminar = useCallback(async id => { if (!window.confirm('¿Eliminar esta patente? Liberarás el cupo para registrar otra.')) return; setEliminando(id); try { await api.delete(`/vehiculos/${id}/`); toast.success('Patente eliminada'); await fetchPage() } catch (error) { toast.error(getApiErrorMessage(error, 'No se pudo eliminar la patente')) } finally { setEliminando(null) } }, [fetchPage])
+  const eliminar = useCallback(async id => {
+    if (!window.confirm('¿Eliminar esta patente? Liberarás el cupo para registrar otra.')) return
+    setEliminando(id)
+    let respaldo = null
+    setPage(current => { respaldo = current; return { ...current, results: current.results.filter(item => item.id !== id), count: Math.max(0, current.count - 1) } })
+    try {
+      await api.delete(`/vehiculos/${id}/`)
+      toast.success('Patente eliminada')
+    } catch (error) {
+      if (respaldo) setPage(respaldo)
+      toast.error(getApiErrorMessage(error, 'No se pudo eliminar la patente'))
+    } finally { setEliminando(null) }
+  }, [])
   return { page, fetchPage, estacionamientos, form, crear, eliminar, eliminando }
 }
