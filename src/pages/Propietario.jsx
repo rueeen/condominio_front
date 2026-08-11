@@ -47,6 +47,8 @@ export default function Propietario() {
   const [lists, setLists] = useState({ visitantes: { ...emptyPage }, vehiculos: { ...emptyPage } })
   const [estacionamientos, setEstacionamientos] = useState(null)
   const [qrVisitor, setQrVisitor] = useState(null)
+  const [eliminandoVisitante, setEliminandoVisitante] = useState(null)
+  const [eliminandoVehiculo, setEliminandoVehiculo] = useState(null)
   const visitorForm = useForm({ resolver: zodResolver(visitorSchema), defaultValues: { tipo_documento: 'rut', numero_documento: '', pais_documento: '', nombre: '', tipo_visita: 'temporal', fecha_fin: '' } })
   const carForm = useForm({ resolver: zodResolver(carSchema) })
 
@@ -82,20 +84,24 @@ export default function Propietario() {
   }
   const eliminarVehiculo = useCallback(async id => {
     if (!window.confirm('¿Eliminar esta patente? Liberarás el cupo para registrar otra.')) return
+    setEliminandoVehiculo(id)
     try {
       await api.delete(`/vehiculos/${id}/`)
       toast.success('Patente eliminada')
       await fetchList('vehiculos')
     } catch (error) { toast.error(getApiErrorMessage(error, 'No se pudo eliminar la patente')) }
+    finally { setEliminandoVehiculo(null) }
   }, [fetchList])
   const eliminarVisitante = useCallback(async id => {
     if (!window.confirm('¿Cancelar esta visita? El código QR dejará de funcionar de inmediato y la persona ya no podrá entrar. Para autorizarla nuevamente, tendrás que crear una nueva visita y compartir un QR distinto.')) return
+    setEliminandoVisitante(id)
     try {
       await api.delete(`/visitantes/${id}/`)
       setQrVisitor(current => current?.id === id ? null : current)
       toast.success('Visita cancelada')
       await fetchList('visitantes')
     } catch (error) { toast.error(getApiErrorMessage(error, 'No se pudo cancelar la visita')) }
+    finally { setEliminandoVisitante(null) }
   }, [fetchList])
 
   const crearVehiculo = async data => {
@@ -133,9 +139,9 @@ export default function Propietario() {
     { header: 'País', accessorKey: 'pais_documento', cell: info => info.getValue() || '—' },
     { header: 'Vigente hasta', accessorKey: 'fecha_fin', cell: info => info.getValue() ? `${format(parseISO(info.getValue()), 'PPp', { locale: es })} (${formatDistanceToNowStrict(parseISO(info.getValue()), { locale: es, addSuffix: true })})` : <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold uppercase text-blue-700">Permanente</span> },
     { header: 'Estado', cell: info => { const permanent = info.row.original.fecha_fin == null; const storedState = info.row.original.estado; const active = permanent || (storedState ? ['vigente', 'activo', 'autorizado'].includes(storedState.toLowerCase()) : isAfter(parseISO(info.row.original.fecha_fin), new Date())); const label = permanent ? 'vigente' : storedState || (active ? 'vigente' : 'expirada'); return <span className={active ? 'badge-green' : 'badge-gray'}>{label}</span> } },
-    { header: 'Acciones', cell: info => <div className="flex flex-wrap gap-2"><button type="button" className="btn-secondary" disabled={!info.row.original.token_qr} onClick={() => setQrVisitor(info.row.original)} title={!info.row.original.token_qr ? 'Esta visita no tiene un código QR' : ''}><QrCode size={17}/> Ver QR</button><button type="button" className="btn-danger" onClick={() => eliminarVisitante(info.row.original.id)}><Trash2 size={15}/> Eliminar</button></div> },
-  ], [eliminarVisitante])
-  const carCols = useMemo(() => [{ header: 'Patente', accessorKey: 'patente' }, { header: 'Estado', cell: info => <span title={info.row.original.motivo_rechazo || ''} className={info.row.original.estado === 'aprobado' ? 'badge-green' : info.row.original.estado === 'rechazado' ? 'badge-red' : 'badge-yellow'}>{info.row.original.estado}</span> }, { header: 'Acciones', cell: info => <button type="button" className="btn-danger" onClick={() => eliminarVehiculo(info.row.original.id)}><Trash2 size={15}/> Eliminar</button> }], [eliminarVehiculo])
+    { header: 'Acciones', cell: info => { const procesando = eliminandoVisitante === info.row.original.id; return <div className="flex flex-wrap gap-2"><button type="button" className="btn-secondary" disabled={!info.row.original.token_qr || procesando} onClick={() => setQrVisitor(info.row.original)} title={!info.row.original.token_qr ? 'Esta visita no tiene un código QR' : ''}><QrCode size={17}/> Ver QR</button><button type="button" className="btn-danger disabled:opacity-50" disabled={procesando} onClick={() => eliminarVisitante(info.row.original.id)}><Trash2 size={15}/> {procesando ? 'Procesando...' : 'Eliminar'}</button></div> } },
+  ], [eliminarVisitante, eliminandoVisitante])
+  const carCols = useMemo(() => [{ header: 'Patente', accessorKey: 'patente' }, { header: 'Estado', cell: info => <span title={info.row.original.motivo_rechazo || ''} className={info.row.original.estado === 'aprobado' ? 'badge-green' : info.row.original.estado === 'rechazado' ? 'badge-red' : 'badge-yellow'}>{info.row.original.estado}</span> }, { header: 'Acciones', cell: info => { const procesando = eliminandoVehiculo === info.row.original.id; return <button type="button" className="btn-danger disabled:opacity-50" disabled={procesando} onClick={() => eliminarVehiculo(info.row.original.id)}><Trash2 size={15}/> {procesando ? 'Procesando...' : 'Eliminar'}</button> } }], [eliminarVehiculo, eliminandoVehiculo])
   const tableProps = name => ({ ...lists[name], data: lists[name].results, onPrevious: () => fetchList(name, lists[name].previous), onNext: () => fetchList(name, lists[name].next) })
 
   return <Layout><div className="mx-auto max-w-5xl">
