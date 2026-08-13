@@ -3,7 +3,7 @@ import { Camera, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 
 export default function QrScanner({ onClose, onScan }) {
-  const secureCameraAvailable = window.isSecureContext && navigator.mediaDevices?.getUserMedia
+  const secureCameraAvailable = Boolean(window.isSecureContext && navigator.mediaDevices?.getUserMedia)
   const insecureContextMessage = `La cámara requiere HTTPS. Estás en una conexión no segura (${window.location.origin}). Usa el sitio publicado en HTTPS o levanta el servidor de desarrollo con certificado.`
   const readerId = `qr-reader-${useId().replace(/:/g, '')}`
   const scannerRef = useRef(null)

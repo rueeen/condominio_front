@@ -6,6 +6,29 @@ import { useEffect, useRef, useState } from 'react'
 // da margen de encuadre a pulso sin mandar tanto fondo como el frame
 // completo, mejorando la precisión del OCR en el backend.
 const RECORTE = { x: 0.18, y: 0.36, width: 0.64, height: 0.22 }
+const MAX_IMAGE_DIMENSION = 1600
+const JPEG_QUALITY = 0.85
+
+const scaledDimensions = (width, height) => {
+  const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(width, height))
+  return { width: Math.round(width * scale), height: Math.round(height * scale) }
+}
+
+const canvasToBlob = canvas => new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', JPEG_QUALITY))
+
+const loadImage = file => new Promise((resolve, reject) => {
+  const url = URL.createObjectURL(file)
+  const image = new Image()
+  image.onload = () => {
+    URL.revokeObjectURL(url)
+    resolve(image)
+  }
+  image.onerror = () => {
+    URL.revokeObjectURL(url)
+    reject(new Error('No se pudo decodificar la imagen'))
+  }
+  image.src = url
+})
 
 export default function CameraCapture({ onCapture }) {
   const videoRef = useRef(null)
@@ -80,12 +103,13 @@ export default function CameraCapture({ onCapture }) {
     const cropWidth = width * RECORTE.width
     const cropHeight = height * RECORTE.height
 
-    canvas.width = cropWidth
-    canvas.height = cropHeight
+    const output = scaledDimensions(cropWidth, cropHeight)
+    canvas.width = output.width
+    canvas.height = output.height
     canvas.getContext('2d').drawImage(
       video,
       cropX, cropY, cropWidth, cropHeight,
-      0, 0, cropWidth, cropHeight,
+      0, 0, output.width, output.height,
     )
     canvas.toBlob((blob) => {
       if (!blob) {
@@ -95,15 +119,30 @@ export default function CameraCapture({ onCapture }) {
       setPreview(blob)
       onCapture(blob)
       stopCamera()
-    }, 'image/jpeg', 0.9)
+    }, 'image/jpeg', JPEG_QUALITY)
   }
 
-  const handleFile = (event) => {
+  const handleFile = async (event) => {
     const file = event.target.files?.[0]
     if (!file) return
-    setPreview(file)
-    onCapture(file)
     event.target.value = ''
+
+    try {
+      setError('')
+      const image = await loadImage(file)
+      const canvas = canvasRef.current
+      if (!canvas) return
+      const output = scaledDimensions(image.naturalWidth, image.naturalHeight)
+      canvas.width = output.width
+      canvas.height = output.height
+      canvas.getContext('2d').drawImage(image, 0, 0, output.width, output.height)
+      const blob = await canvasToBlob(canvas)
+      if (!blob) throw new Error('No se pudo convertir la imagen')
+      setPreview(blob)
+      onCapture(blob)
+    } catch {
+      setError('No se pudo procesar la imagen seleccionada. Intenta con otra foto.')
+    }
   }
 
   return <div className="space-y-3">
