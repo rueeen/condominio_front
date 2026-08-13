@@ -15,13 +15,15 @@ export default function Propietarios() {
   const [desvinculandoEstacionamiento, setDesvinculandoEstacionamiento] = useState(null)
   const [nuevoPropietario, setNuevoPropietario] = useState({ username: '', password: '', first_name: '', last_name: '', torre: '', departamento: '' })
   const [guardandoPropietario, setGuardandoPropietario] = useState(false)
+  const editandoId = editando?.id
   const fetchList = useCallback(async (name, url = `/${name}/`) => {
     const setter = name === 'propietarios' ? setPropietarios : setEstacionamientos
     setter(current => ({ ...current, loading: true, error: '' }))
     try { const response = await api.get(url); setter({ ...normalizeListResponse(response.data), loading: false, error: '' }) }
     catch (error) { setter(current => ({ ...current, loading: false, error: getApiErrorMessage(error, 'No se pudieron cargar los registros') })) }
   }, [])
-  useEffect(() => { Promise.all([fetchList('propietarios'), fetchList('estacionamientos')]) }, [fetchList])
+  useEffect(() => { fetchList('propietarios') }, [fetchList])
+  useEffect(() => { if (editandoId) fetchList('estacionamientos', `/estacionamientos/?propietario=${editandoId}`) }, [editandoId, fetchList])
   const abrirEdicion = propietario => setEditando({ ...propietario, torre: String(propietario.torre), departamento: String(propietario.departamento) })
   const guardarPropietario = async event => {
     event.preventDefault(); const torre = Number(editando.torre), departamento = Number(editando.departamento)
@@ -47,17 +49,27 @@ export default function Propietarios() {
   const agregarEstacionamientoAEditando = async event => {
     event.preventDefault(); if (!numeroEstacionamientoRapido.trim()) return toast.error('Ingresa el número de estacionamiento')
     setGuardandoEstacionamiento(true)
-    try { await api.post('/estacionamientos/', { numero: numeroEstacionamientoRapido.trim(), propietario: editando.id }); toast.success('Estacionamiento asignado'); setNumeroEstacionamientoRapido(''); await Promise.all([fetchList('estacionamientos'), fetchList('propietarios')]) }
-    catch (error) { toast.error(getApiErrorMessage(error, 'No se pudo asignar el estacionamiento')) }
+    try {
+      const payload = { numero: numeroEstacionamientoRapido.trim(), propietario: editando.id }
+      try { await api.post('/estacionamientos/asignar/', payload) }
+      catch (error) {
+        if (error.response?.status !== 409) throw error
+        const actual = error.response.data?.propietario_actual || error.response.data?.propietario
+        const unidad = actual ? `Torre ${actual.torre} · Depto ${actual.departamento}` : 'otro propietario'
+        if (!window.confirm(`El estacionamiento ${payload.numero} ya pertenece a ${unidad}. ¿Quieres reasignarlo?`)) return
+        await api.post('/estacionamientos/asignar/', { ...payload, reasignar: true })
+      }
+      toast.success('Estacionamiento asignado'); setNumeroEstacionamientoRapido(''); await Promise.all([fetchList('estacionamientos', `/estacionamientos/?propietario=${editando.id}`), fetchList('propietarios')])
+    } catch (error) { toast.error(getApiErrorMessage(error, 'No se pudo asignar el estacionamiento')) }
     finally { setGuardandoEstacionamiento(false) }
   }
   const desvincularEstacionamiento = useCallback(async estacionamiento => {
     if (!window.confirm(`¿Quitar el estacionamiento ${estacionamiento.numero} de este propietario? El espacio quedará libre y el propietario perderá ese cupo de patentes.`)) return
     setDesvinculandoEstacionamiento(estacionamiento.id)
-    try { await api.patch(`/estacionamientos/${estacionamiento.id}/`, { propietario: null }); toast.success('Estacionamiento desvinculado'); await Promise.all([fetchList('estacionamientos'), fetchList('propietarios')]) }
+    try { await api.patch(`/estacionamientos/${estacionamiento.id}/`, { propietario: null }); toast.success('Estacionamiento desvinculado'); await Promise.all([fetchList('estacionamientos', `/estacionamientos/?propietario=${editando.id}`), fetchList('propietarios')]) }
     catch (error) { toast.error(getApiErrorMessage(error, 'No se pudo desvincular el estacionamiento')) }
     finally { setDesvinculandoEstacionamiento(null) }
-  }, [fetchList])
+  }, [editando?.id, fetchList])
   const columns = useMemo(() => [
     { header: 'Usuario', accessorKey: 'username' }, { header: 'Nombre', accessorFn: propietario => `${propietario.first_name} ${propietario.last_name}`.trim() || '—' },
     { header: 'Unidad', cell: info => <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600"><Building2 size={13}/> Torre {info.row.original.torre} · Depto {info.row.original.departamento}</span> },
@@ -80,7 +92,7 @@ export default function Propietarios() {
       <div><label className="block text-sm" htmlFor="torre">Torre</label><input id="torre" className="input" type="number" min="1" max="25" required value={editando.torre} onChange={event => setEditando(current => ({ ...current, torre: event.target.value }))}/></div>
       <div><label className="block text-sm" htmlFor="departamento">Departamento</label><input id="departamento" className="input" type="number" required value={editando.departamento} onChange={event => setEditando(current => ({ ...current, departamento: event.target.value }))}/></div>
       <button className="btn-ok" disabled={guardando}>{guardando ? 'Guardando...' : 'Guardar'}</button><button className="btn-secondary" type="button" disabled={guardando} onClick={() => setEditando(null)}>Cancelar</button>
-    </form><div className="border-t border-[#4696e5]/20 pt-4"><p className="mb-2 text-sm font-semibold">Estacionamientos de este propietario</p><div className="mb-3 flex flex-wrap gap-2">{estacionamientos.results.filter(item => item.propietario === editando.id).length === 0 ? <span className="badge-gray">Sin estacionamiento</span> : estacionamientos.results.filter(item => item.propietario === editando.id).map(item => <span key={item.id} className="inline-flex items-center gap-1.5 rounded-full bg-[#4696e5]/10 py-1 pl-3 pr-1.5 text-xs font-bold text-[#317fcf]"><ParkingSquare size={12}/> {item.numero}<button type="button" disabled={desvinculandoEstacionamiento === item.id} className="rounded-full p-0.5 hover:bg-red-100 hover:text-red-600 disabled:opacity-50" aria-label={`Desvincular estacionamiento ${item.numero} de este propietario`} onClick={() => desvincularEstacionamiento(item)}><X size={13}/></button></span>)}</div>
+    </form><div className="border-t border-[#4696e5]/20 pt-4"><p className="mb-2 text-sm font-semibold">Estacionamientos de este propietario</p><div className="mb-3 flex flex-wrap gap-2">{estacionamientos.results.length === 0 ? <span className="badge-gray">Sin estacionamiento</span> : estacionamientos.results.map(item => <span key={item.id} className="inline-flex items-center gap-1.5 rounded-full bg-[#4696e5]/10 py-1 pl-3 pr-1.5 text-xs font-bold text-[#317fcf]"><ParkingSquare size={12}/> {item.numero}<button type="button" disabled={desvinculandoEstacionamiento === item.id} className="rounded-full p-0.5 hover:bg-red-100 hover:text-red-600 disabled:opacity-50" aria-label={`Desvincular estacionamiento ${item.numero} de este propietario`} onClick={() => desvincularEstacionamiento(item)}><X size={13}/></button></span>)}</div>
       <form className="flex items-end gap-2" onSubmit={agregarEstacionamientoAEditando}><div><label className="block text-sm" htmlFor="estacionamiento-rapido">Número</label><input id="estacionamiento-rapido" className="input w-36" placeholder="228" value={numeroEstacionamientoRapido} onChange={event => setNumeroEstacionamientoRapido(event.target.value)}/></div><button className="btn-primary" disabled={guardandoEstacionamiento}><Plus size={16}/> {guardandoEstacionamiento ? 'Agregando...' : 'Agregar'}</button></form>
     </div></div>}
     <Table {...propietarios} data={propietarios.results} columns={columns} onPrevious={() => fetchList('propietarios', propietarios.previous)} onNext={() => fetchList('propietarios', propietarios.next)}/>
