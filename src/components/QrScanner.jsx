@@ -3,19 +3,33 @@ import { Camera, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 
 export default function QrScanner({ onClose, onScan }) {
+  const secureCameraAvailable = window.isSecureContext && navigator.mediaDevices?.getUserMedia
+  const insecureContextMessage = `La cámara requiere HTTPS. Estás en una conexión no segura (${window.location.origin}). Usa el sitio publicado en HTTPS o levanta el servidor de desarrollo con certificado.`
   const readerId = `qr-reader-${useId().replace(/:/g, '')}`
   const scannerRef = useRef(null)
+  const startPromiseRef = useRef(null)
+  const cleanupPromiseRef = useRef(Promise.resolve())
   const handledRef = useRef(false)
-  const [error, setError] = useState('')
+  const [error, setError] = useState(secureCameraAvailable ? '' : insecureContextMessage)
 
   useEffect(() => {
-    let mounted = true
+    let cancelled = false
     const scanner = new Html5Qrcode(readerId)
     scannerRef.current = scanner
+    const previousCleanup = cleanupPromiseRef.current
+
+    const clearScanner = activeScanner => {
+      try { activeScanner?.clear() } catch { /* La instancia puede no haber alcanzado a crear su UI. */ }
+    }
+
+    if (!secureCameraAvailable) {
+      return () => { cancelled = true; clearScanner(scanner) }
+    }
 
     const start = async () => {
       try {
-        // La cámara requiere HTTPS fuera de localhost, igual que getUserMedia.
+        await previousCleanup
+        if (cancelled) return
         await scanner.start(
           { facingMode: 'environment' },
           { fps: 10, qrbox: { width: 250, height: 250 } },
@@ -26,20 +40,28 @@ export default function QrScanner({ onClose, onScan }) {
           },
           () => {},
         )
-      } catch {
-        if (mounted) setError('No se pudo acceder a la cámara. Revisa el permiso del navegador o usa el ingreso manual.')
+        if (cancelled && scanner.isScanning) await scanner.stop()
+      } catch (cameraError) {
+        if (!cancelled) {
+          const messages = { NotAllowedError: 'No diste permiso para usar la cámara. Habilítalo en la configuración del navegador.', NotFoundError: 'No se encontró una cámara en este dispositivo.', NotReadableError: 'La cámara está ocupada por otra aplicación. Ciérrala e intenta nuevamente.' }
+          setError(messages[cameraError?.name] || 'No se pudo acceder a la cámara. Revisa el permiso del navegador o usa el ingreso manual.')
+        }
       }
     }
-    start()
+    startPromiseRef.current = start()
 
     return () => {
-      mounted = false
+      cancelled = true
       const activeScanner = scannerRef.current
       scannerRef.current = null
-      if (activeScanner?.isScanning) activeScanner.stop().catch(() => {}).finally(() => activeScanner.clear())
-      else activeScanner?.clear()
+      const startPromise = startPromiseRef.current
+      startPromiseRef.current = null
+      cleanupPromiseRef.current = startPromise?.catch(() => {}).then(async () => {
+        if (activeScanner?.isScanning) await activeScanner.stop().catch(() => {})
+        clearScanner(activeScanner)
+      }) || Promise.resolve()
     }
-  }, [onScan, readerId])
+  }, [onScan, readerId, secureCameraAvailable])
 
   return <div className="rounded-2xl border-2 border-[#4696e5] bg-blue-50 p-4">
     <div className="mb-3 flex items-center justify-between gap-3">

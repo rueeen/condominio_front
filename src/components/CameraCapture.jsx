@@ -50,13 +50,18 @@ export default function CameraCapture({ onCapture }) {
     setError('')
     clearCapturedUrl()
 
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      setError(`La cámara requiere HTTPS. Estás en una conexión no segura (${window.location.origin}). Usa el sitio publicado en HTTPS o levanta el servidor de desarrollo con certificado.`)
+      return
+    }
+
     try {
-      // getUserMedia requiere HTTPS excepto en localhost; para probar en un dispositivo real usa vite --host --https o ngrok.
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } })
       streamRef.current = stream
       setCameraActive(true)
-    } catch {
-      setError('No se pudo activar la cámara. Puedes continuar subiendo una foto desde el dispositivo.')
+    } catch (cameraError) {
+      const messages = { NotAllowedError: 'No diste permiso para usar la cámara. Habilítalo en la configuración del navegador.', NotFoundError: 'No se encontró una cámara en este dispositivo.', NotReadableError: 'La cámara está ocupada por otra aplicación. Ciérrala e intenta nuevamente.' }
+      setError(messages[cameraError?.name] || 'No se pudo activar la cámara. Puedes continuar subiendo una foto desde el dispositivo.')
       stopCamera()
     }
   }
@@ -107,16 +112,19 @@ export default function CameraCapture({ onCapture }) {
       <button type="button" onClick={activateCamera} className="btn-secondary h-14 w-full justify-center text-xl"><RefreshCw /> Reintentar</button>
     </div> : <>
       {cameraActive ? <div className="space-y-3">
-        <div className="relative overflow-hidden rounded-2xl bg-slate-900">
-          <video ref={videoRef} autoPlay playsInline muted className="max-h-72 w-full object-cover" />
-          <div className="pointer-events-none absolute inset-x-[18%] inset-y-[36%] rounded-xl border-4 border-yellow-300 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" />
+        <div className="overflow-hidden rounded-2xl bg-slate-900 text-center">
+          <div className="relative inline-block max-w-full align-bottom">
+            {/* object-contain mantiene la guía alineada con el frame; object-cover volvería a desfasar el recorte. */}
+            <video ref={videoRef} autoPlay playsInline muted className="block max-h-72 max-w-full object-contain" />
+            <div className="pointer-events-none absolute rounded-xl border-4 border-yellow-300 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" style={{ left: `${RECORTE.x * 100}%`, top: `${RECORTE.y * 100}%`, width: `${RECORTE.width * 100}%`, height: `${RECORTE.height * 100}%` }} />
+          </div>
         </div>
         <p className="text-center text-sm text-slate-500">Encuadra la patente dentro del recuadro y presiona Capturar</p>
         <button type="button" onClick={captureFrame} className="btn-primary h-16 w-full text-xl"><Camera /> Capturar</button>
       </div> : <button type="button" onClick={activateCamera} className="btn-secondary h-16 w-full justify-center text-xl"><Camera /> Activar cámara</button>}
     </>}
     {error && <p className="text-sm text-red-600">{error}</p>}
-    {error && <label className="btn-secondary flex h-16 w-full cursor-pointer justify-center text-xl"><Camera /> Subir foto de patente<input className="hidden" type="file" accept="image/*" capture="environment" onChange={handleFile} /></label>}
+    <label className="btn-secondary flex h-16 w-full cursor-pointer justify-center text-xl"><Camera /> Subir foto de patente<input className="hidden" type="file" accept="image/*" capture="environment" onChange={handleFile} /></label>
     <canvas ref={canvasRef} className="hidden" />
   </div>
 }
