@@ -14,6 +14,7 @@ const imageRequestError = error => {
   if (status === 403) return { message: 'Tu usuario no tiene rol de guardia para usar esta función', resultStatus: 'server', title: 'SIN PERMISO' }
   if ([400, 413].includes(status)) return { message: getApiErrorMessage(error, 'La imagen no es válida'), resultStatus: 'server', title: 'IMAGEN NO VÁLIDA' }
   if (status === 429) return { message: 'Demasiados intentos seguidos. Espera un minuto e intenta de nuevo.', resultStatus: 'server', title: 'DEMASIADOS INTENTOS' }
+  if (status === 503) return { message: getApiErrorMessage(error, 'El motor OCR no está disponible en el servidor.'), resultStatus: 'server', title: 'OCR NO DISPONIBLE' }
   if (status >= 500) return { message: 'Error del servidor al procesar la imagen', resultStatus: 'server', title: 'ERROR DEL SERVIDOR' }
   return { message: getApiErrorMessage(error, 'No se pudo procesar la solicitud'), resultStatus: 'server', title: 'ERROR DEL SERVIDOR' }
 }
