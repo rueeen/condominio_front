@@ -30,7 +30,7 @@ const loadImage = file => new Promise((resolve, reject) => {
   image.src = url
 })
 
-export default function CameraCapture({ onCapture }) {
+export default function CameraCapture({ onCapture, onRetry }) {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const streamRef = useRef(null)
@@ -70,6 +70,7 @@ export default function CameraCapture({ onCapture }) {
   }
 
   const activateCamera = async () => {
+    onRetry?.()
     setError('')
     clearCapturedUrl()
 
@@ -131,7 +132,7 @@ export default function CameraCapture({ onCapture }) {
       setError('')
       const image = await loadImage(file)
       const canvas = canvasRef.current
-      if (!canvas) return
+      if (!canvas) throw new Error('No se encontró el área de procesamiento')
       const output = scaledDimensions(image.naturalWidth, image.naturalHeight)
       canvas.width = output.width
       canvas.height = output.height
@@ -155,10 +156,10 @@ export default function CameraCapture({ onCapture }) {
           <div className="relative inline-block max-w-full align-bottom">
             {/* object-contain mantiene la guía alineada con el frame; object-cover volvería a desfasar el recorte. */}
             <video ref={videoRef} autoPlay playsInline muted className="block max-h-72 max-w-full object-contain" />
-            <div className="pointer-events-none absolute rounded-xl border-4 border-yellow-300 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" style={{ left: `${RECORTE.x * 100}%`, top: `${RECORTE.y * 100}%`, width: `${RECORTE.width * 100}%`, height: `${RECORTE.height * 100}%` }} />
+            <div className="pointer-events-none absolute rounded-xl border-4 border-yellow-300 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" style={{ left: `${RECORTE.x * 100}%`, top: `${RECORTE.y * 100}%`, width: `${RECORTE.width * 100}%`, height: `${RECORTE.height * 100}%` }}><span className="absolute left-2 right-2 top-1/2 border-t border-dashed border-yellow-300" /></div>
           </div>
         </div>
-        <p className="text-center text-sm text-slate-500">Encuadra la patente dentro del recuadro y presiona Capturar</p>
+        <p className="text-center text-sm text-slate-500">Encuadra la patente dentro del recuadro, lo más nivelada posible, y presiona Capturar</p>
         <button type="button" onClick={captureFrame} className="btn-primary h-16 w-full text-xl"><Camera /> Capturar</button>
       </div> : <button type="button" onClick={activateCamera} className="btn-secondary h-16 w-full justify-center text-xl"><Camera /> Activar cámara</button>}
     </>}
